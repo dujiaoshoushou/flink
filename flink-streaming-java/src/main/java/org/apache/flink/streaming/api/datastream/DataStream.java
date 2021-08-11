@@ -111,6 +111,9 @@ import java.util.List;
  * </ul>
  *
  * @param <T> The type of the elements in this stream.
+ * DataStream是否Flink数据流的核心抽象，其上定义了对数据流的一系列操作，同时也定义了与其他类型DataStream的相互
+ *           转换的关系。每个DataStream都有一个Transformation对象，表示该DataStream从上游的DataStream使用
+ *           该Transformation而来。
  */
 @Public
 public class DataStream<T> {

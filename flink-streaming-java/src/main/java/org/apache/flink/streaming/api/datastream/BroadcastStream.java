@@ -41,6 +41,8 @@ import static java.util.Objects.requireNonNull;
  * {@link BroadcastConnectedStream} for further processing.
  *
  * @param <T> The type of input/output elements.
+ *
+ *          对一个普通的DataStream进行封装，提供DataStream的广播行为。
  */
 @PublicEvolving
 public class BroadcastStream<T> {

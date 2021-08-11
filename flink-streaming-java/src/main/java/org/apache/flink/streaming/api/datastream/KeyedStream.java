@@ -92,6 +92,11 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  *
  * @param <T> The type of the elements in the Keyed Stream.
  * @param <KEY> The type of the key in the Keyed Stream.
+ *
+ *           KeyedStream用来表示根据指定的key进行分组的数据流。一个KeyedStream可以通过调用
+ *           DataStream.keyBy()来获得。而在KeyedStream上进行的任何Transtromation都将
+ *             转变回DataStream。在实现中，KeyedStream把key的信息写入了Transtroation中。
+ *             每条记录只能访问所属key的状态，其上的聚合函数可以方便地操作和保存对应key的状态。
  */
 @Public
 public class KeyedStream<T, KEY> extends DataStream<T> {

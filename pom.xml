@@ -88,6 +88,7 @@ under the License.
 		<module>flink-ml-parent</module>
 		<module>flink-walkthroughs</module>
 		<module>flink-kubernetes</module>
+		<module>flink-unicorn-demo</module>
 	</modules>
 
 	<properties>

@@ -58,6 +58,13 @@ import static java.util.Objects.requireNonNull;
  *     .window(TumblingEventTimeWindows.of(Time.of(5, TimeUnit.SECONDS)))
  *     .apply(new MyJoinFunction());
  * } </pre>
+ *
+ * Join是CoGroup的一种特例，JoinedStreams底层使用CoGroupedSteams来实现。两者的区别如下：
+ *    CoGroup侧重的是Group，对数据进行分组，是对同一个key上的两组集合进行操作，可以编写灵活的代码来实现特定的业务功能。
+ *   Join侧重的是数据对，对同一个key的每一对元素进行操作。CoGroup更通用，但因为Join是数据库上的常见操作，所以在CoGroup
+ *   基础上提供Join的特性。
+ *   JoinGroup和CoGroup两者都是对持续不断地产生的数据做运行，但是有不能无限地在内存中持有数据，对所有的数据进行Join的笛卡尔积操作
+ *   理论上不可行（理论上内存不足可以刷出到磁盘，反复的硬盘读写会导致性能变的很差），所以底层上，两者都是基于Window实现。
  */
 @Public
 public class JoinedStreams<T1, T2> {

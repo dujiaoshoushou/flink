@@ -55,6 +55,11 @@ import static java.util.Objects.requireNonNull;
  *
  * @param <IN1> Type of the first input data steam.
  * @param <IN2> Type of the second input data stream.
+ *
+ *       ConnectedStreams表示两个数据流的组合，两个数据流可以类型一样，也可以类型不一样。
+ *             ConnectedStreams使用与两个有关系的数据流的操作，共享State。一种典型的场景是动态规则数据处理。
+ *             两个流中一个是数据流，一个是随时间更新的业务规则，业务规则流中的规则保存在State中，规则会持续更新state。
+ *             当数据流中的新数据到来时，使用保存在State中的规则进行数据处理。
  */
 @Public
 public class ConnectedStreams<IN1, IN2> {

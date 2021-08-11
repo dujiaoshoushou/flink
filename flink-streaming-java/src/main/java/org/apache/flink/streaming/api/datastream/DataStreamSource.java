@@ -28,6 +28,9 @@ import org.apache.flink.streaming.api.transformations.SourceTransformation;
  * The DataStreamSource represents the starting point of a DataStream.
  *
  * @param <T> Type of the elements in the DataStream created from the this source.
+ * DataStreamSource是DataStream的起点，DataStreamSource在 {@link StreamExecutionEnvironment}
+ *           中创建，由StreamExecutionEnvironment.addSouce(SourceFunction)创建而来，其中
+ *           SourceFunction中包含了DataStreamSource从数据源读取数据的具体逻辑。
  */
 @Public
 public class DataStreamSource<T> extends SingleOutputStreamOperator<T> {

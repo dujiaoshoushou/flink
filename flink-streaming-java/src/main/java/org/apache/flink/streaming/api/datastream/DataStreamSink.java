@@ -29,6 +29,10 @@ import org.apache.flink.streaming.api.transformations.SinkTransformation;
  * A Stream Sink. This is used for emitting elements from a streaming topology.
  *
  * @param <T> The type of the elements in the Stream
+ *
+ *           数据从DataSourceStream中读取，经过中间的一系列处理操作，最终需要写出到外部存储，
+ *           通过DataStream.addSink(sinkFunction）创建而来，其中sinkFunction定义了写出
+ *           数据到外部存储的具体逻辑。
  */
 @Public
 public class DataStreamSink<T> {

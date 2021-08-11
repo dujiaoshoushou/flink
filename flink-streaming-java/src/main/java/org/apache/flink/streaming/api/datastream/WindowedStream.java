@@ -97,6 +97,9 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
  * @param <T> The type of elements in the stream.
  * @param <K> The type of the key by which elements are grouped.
  * @param <W> The type of {@code Window} that the {@code WindowAssigner} assigns the elements to.
+ *
+ *           WindowedStream代表了根据key分组且基于WindowAssigner切分窗口的数据流。所以WindowedStream都是
+ *           从KeyedStream衍生而来的，在WindowedStream上进行任何Transformation也都将转变回DataStream
  */
 @Public
 public class WindowedStream<T, K, W extends Window> {
