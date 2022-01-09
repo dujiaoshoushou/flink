@@ -784,6 +784,14 @@ public class ExecutionGraph implements AccessExecutionGraph {
 	//  Actions
 	// --------------------------------------------------------------------------------------------
 
+	/**
+	 * 主要完成两件事情
+	 * 1. 构造ExecutionGraph的节点，将JobVertex封装成ExecutioJobVertex
+	 * 2. 构造ExecutionEdge，建立ExecutionGraph的节点之间的相互联系，把节点通过ExecutionEdge连接
+	 * @param topologiallySorted
+	 * @throws JobException
+	 */
+
 	public void attachJobGraph(List<JobVertex> topologiallySorted) throws JobException {
 
 		assertRunningInJobMasterMainThread();

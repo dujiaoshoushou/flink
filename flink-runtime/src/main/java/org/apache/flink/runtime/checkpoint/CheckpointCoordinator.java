@@ -500,13 +500,21 @@ public class CheckpointCoordinator {
 			throw new IllegalArgumentException("Only synchronous savepoints are allowed to advance the watermark to MAX.");
 		}
 
-		// make some eager pre-checks
+		// make some eager pre-checks，检查点的前置工作
+		/**
+		 *  1. 前置检查，确保作业关闭过程中不允许被执行。
+		 * 	 * 如果未启用，或尚未达到触发检查点的最小间隔，同样不允许执行。
+		 */
 		synchronized (lock) {
 			preCheckBeforeTriggeringCheckpoint(isPeriodic, props.forceCheckpoint());
 		}
 
 		// check if all tasks that we need to trigger are running.
 		// if not, abort the checkpoint
+		/**
+		 * 2. 检查是否所有需要执行检查点的Task都处于执行状态，能够执行检查点
+		 *    和向JobMaster汇报，若不是则整个作业的检查点无法完成
+		 */
 		Execution[] executions = new Execution[tasksToTrigger.length];
 		for (int i = 0; i < tasksToTrigger.length; i++) {
 			Execution ee = tasksToTrigger[i].getCurrentExecutionAttempt();
@@ -551,6 +559,11 @@ public class CheckpointCoordinator {
 		try {
 			// this must happen outside the coordinator-wide lock, because it communicates
 			// with external services (in HA mode) and may block for a while.
+			/**
+			 * 3. 执行checkpointID = checkpointIdCounter.getAndIncrement();
+			 * 生成一个新的id，然后生成一个PendingCheckpoint。PendingCheckpoint是一个启动了的检查点，
+			 * 但是还没有别确认。等到所有Task都确认了本次检查点，那么这个检查点对象将转化为一个CompletedCheckpoint
+			 */
 			checkpointID = checkpointIdCounter.getAndIncrement();
 
 			checkpointStorageLocation = props.isSavepoint() ?
@@ -586,6 +599,10 @@ public class CheckpointCoordinator {
 		}
 
 		// schedule the timer that will clean up the expired checkpoints
+		/**
+		 * 4. JobMaster不能无限期等待检查点的执行，所以需要进行超时监视，
+		 * 如果超时尚未完成检查点，则取消本次检查点。
+		 */
 		final Runnable canceller = () -> {
 			synchronized (lock) {
 				// only do the work if the checkpoint is not discarded anyways
@@ -621,6 +638,9 @@ public class CheckpointCoordinator {
 				}
 
 				// TODO, asynchronously snapshots master hook without waiting here
+				/**
+				 * 5. 触发MasterHooks，用户可以定义一些额外的操作，用以增强检查点的功能（如准备和清理外部资源）
+				 */
 				for (MasterTriggerRestoreHook<?> masterHook : masterHooks.values()) {
 					final MasterState masterState =
 						MasterHooks.triggerHook(masterHook, checkpointID, timestamp, executor)
@@ -636,6 +656,9 @@ public class CheckpointCoordinator {
 					checkpointStorageLocation.getLocationReference());
 
 			// send the messages to the tasks that trigger their checkpoint
+			/**
+			 * 如果一切正常，则向各个SourceStreamTask发送通知，触发检查点执行。
+			 */
 			for (Execution execution: executions) {
 				if (props.isSynchronous()) {
 					execution.triggerSynchronousSavepoint(checkpointID, timestamp, checkpointOptions, advanceToEndOfTime);
@@ -841,7 +864,9 @@ public class CheckpointCoordinator {
 	 * @param pendingCheckpoint to complete
 	 * @throws CheckpointException if the completion failed
 	 */
-	private void completePendingCheckpoint(PendingCheckpoint pendingCheckpoint) throws CheckpointException {
+	private void
+
+	completePendingCheckpoint(PendingCheckpoint pendingCheckpoint) throws CheckpointException {
 		final long checkpointId = pendingCheckpoint.getCheckpointId();
 		final CompletedCheckpoint completedCheckpoint;
 
@@ -1484,6 +1509,13 @@ public class CheckpointCoordinator {
 		return pendingCheckpoints.values().stream().allMatch(PendingCheckpoint::isDiscarded);
 	}
 
+	/**
+	 * 前置检查，确保作业关闭过程中不允许被执行。
+	 * 如果未启用，或尚未达到触发检查点的最小间隔，同样不允许执行。
+	 * @param isPeriodic
+	 * @param forceCheckpoint
+	 * @throws CheckpointException
+	 */
 	private void preCheckBeforeTriggeringCheckpoint(boolean isPeriodic, boolean forceCheckpoint) throws CheckpointException {
 		// abort if the coordinator has been shutdown in the meantime
 		if (shutdown) {

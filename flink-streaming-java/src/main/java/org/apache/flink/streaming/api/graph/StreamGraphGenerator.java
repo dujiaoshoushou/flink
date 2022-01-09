@@ -194,6 +194,10 @@ public class StreamGraphGenerator {
 		this.savepointRestoreSettings = savepointRestoreSettings;
 	}
 
+	/**
+	 * 负责具体生成StreamGraph
+	 * @return
+	 */
 	public StreamGraph generate() {
 		streamGraph = new StreamGraph(executionConfig, checkpointConfig, savepointRestoreSettings);
 		streamGraph.setStateBackend(stateBackend);
@@ -207,6 +211,7 @@ public class StreamGraphGenerator {
 		alreadyTransformed = new HashMap<>();
 
 		for (Transformation<?> transformation: transformations) {
+			// 实际执行StramGraph的生成
 			transform(transformation);
 		}
 
@@ -245,7 +250,7 @@ public class StreamGraphGenerator {
 
 		// call at least once to trigger exceptions about MissingTypeInfo
 		transform.getOutputType();
-
+		// 遍历transformations集合，并对其每一个Tranformation调用transform()方法
 		Collection<Integer> transformedIds;
 		if (transform instanceof OneInputTransformation<?, ?>) {
 			transformedIds = transformOneInputTransform((OneInputTransformation<?, ?>) transform);
@@ -650,7 +655,7 @@ public class StreamGraphGenerator {
 		}
 
 		String slotSharingGroup = determineSlotSharingGroup(transform.getSlotSharingGroup(), inputIds);
-
+		// 通过addOperator()方法，构造StreamNode
 		streamGraph.addOperator(transform.getId(),
 				slotSharingGroup,
 				transform.getCoLocationGroupKey(),
@@ -670,6 +675,7 @@ public class StreamGraphGenerator {
 		streamGraph.setMaxParallelism(transform.getId(), transform.getMaxParallelism());
 
 		for (Integer inputId: inputIds) {
+			// 通过addEdge方法构造StreamEdge
 			streamGraph.addEdge(inputId, transform.getId(), 0);
 		}
 

@@ -266,6 +266,18 @@ public class StreamGraph implements Pipeline {
 		sinks.add(vertexID);
 	}
 
+	/**
+	 * 构造StreamNode
+	 * @param vertexID
+	 * @param slotSharingGroup
+	 * @param coLocationGroup
+	 * @param operatorFactory
+	 * @param inTypeInfo
+	 * @param outTypeInfo
+	 * @param operatorName
+	 * @param <IN>
+	 * @param <OUT>
+	 */
 	public <IN, OUT> void addOperator(
 			Integer vertexID,
 			@Nullable String slotSharingGroup,

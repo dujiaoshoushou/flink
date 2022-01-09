@@ -103,18 +103,24 @@ public abstract class AbstractStreamOperator<OUT>
 	// ----------- configuration properties -------------
 
 	// A sane default for most operators
+	/**
+	 * 用于指定Operator的上下游算子链接策略，默认是ChainingStrategy.HEAD
+	 */
 	protected ChainingStrategy chainingStrategy = ChainingStrategy.HEAD;
 
 	// ---------------- runtime fields ------------------
 
-	/** The task that contains this operator (and other operators in the same chain). */
+	/** The task that contains this operator (and other operators in the same chain).
+	 * 表示当前Operator所属的StreamTask，最终会通过StreamTask中的invoke()方法执行当前StreamTask中的所有Operator
+	 * */
 	private transient StreamTask<?, ?> container;
-
+	/** 存储该StreamOperator的配置信息，实际上是对Configuration参数进行了封装 */
 	protected transient StreamConfig config;
-
+	/** 定义了当前StreamOperator的输出操作，执行完该算子的所有转换操作后，会通过Output组件将数据推送到下游算子继续执行。*/
 	protected transient Output<StreamRecord<OUT>> output;
 
-	/** The runtime context for UDFs. */
+	/** The runtime context for UDFs.
+	 * 定义了UDF执行过程中的上下文信息。例如获取累加器、状态数据 */
 	private transient StreamingRuntimeContext runtimeContext;
 
 	// ---------------- key/value state ------------------
@@ -124,6 +130,7 @@ public abstract class AbstractStreamOperator<OUT>
 	 * scope keyed state to a key. This is null if the operator is not a keyed operator.
 	 *
 	 * <p>This is for elements from the first input.
+	 * 只有DataStream经过keyBy()转换操作生成KeyedStream后，才会设定该算子的stateKeySelector1变量信息
 	 */
 	private transient KeySelector<?, ?> stateKeySelector1;
 
@@ -132,38 +139,53 @@ public abstract class AbstractStreamOperator<OUT>
 	 * scope keyed state to a key. This is null if the operator is not a keyed operator.
 	 *
 	 * <p>This is for elements from the second input.
+	 * 只有在执行两个KeyedStream关联操作时使用，例如join操作，在AbstractStreamOperator中会保存stateKeySelector2的信息。
 	 */
 	private transient KeySelector<?, ?> stateKeySelector2;
 
-	/** Backend for keyed state. This might be empty if we're not on a keyed stream. */
+	/** Backend for keyed state. This might be empty if we're not on a keyed stream.
+	 * 用于存储KeyedState的状态关联后端，默认为HeapKeyStateBackend。如果配置RocksDB作为状态存储后端，则此处为RocksDBKeyedStateBackend */
 	private transient AbstractKeyedStateBackend<?> keyedStateBackend;
 
-	/** Keyed state store view on the keyed backend. */
+	/** Keyed state store view on the keyed backend.
+	 * 主要提供KeyedState的状态存储服务，实际上是对KeyedStateBackend进行封装并提供了不同类型的KeyedState获取方法。
+	 * 例如：通过get ReducingState(ReducingStateDescriptor stateProperites) 方法获取ReducingState */
 	private transient DefaultKeyedStateStore keyedStateStore;
 
 	// ---------------- operator state ------------------
 
-	/** Operator state backend / store. */
+	/** Operator state backend / store.
+	 * 和keyedStateBackend 相似，主要提供OpeartorState对应的状态后端存储，
+	 * 默认OpeartorStateBackend 只有DefaultOperatorStateBackend实现 */
 	private transient OperatorStateBackend operatorStateBackend;
 
 	// --------------- Metrics ---------------------------
 
-	/** Metric group for the operator. */
+	/** Metric group for the operator.
+	 * 用于记录当前算子层面的监控指标 */
 	protected transient OperatorMetricGroup metrics;
-
+	/** 用于采集和汇报当前Operator的延时情况 */
 	protected transient LatencyStats latencyStats;
 
 	// ---------------- time handler ------------------
-
+	/** 基于ProcessingTime的时间服务，实现ProcessingTime时间域操作，
+	 * 例如获取当前ProcessingTime，然后创建定时器回调等 */
 	private transient ProcessingTimeService processingTimeService;
+	/** Flink内部时间服务，和processingTimeService相似，但支持基于事件时间的时间域处理数据，
+	 * 还可以同时注册基于事件时间和处理时间的定时器，例如在窗口、CEP等高级类型的算子中，会在ProcessFunction中通过timeServiceManager
+	 * 注册Timer定时器，当事件时间或处理时间到达指定时间后执行Timer定时器，以实现复杂的函数计算 */
 	protected transient InternalTimeServiceManager<?> timeServiceManager;
 
 	// ---------------- two-input operator watermarks ------------------
 
 	// We keep track of watermarks from both inputs, the combined input is the minimum
 	// Once the minimum advances we emit a new watermark for downstream operators
+	/** 在双输入类型的算子中，如果基于事件时间处理乱序时间，会在AbstractStreamOperator中合并输入Watermark，
+	 * 选择最小的Watermark作为合并后的指标，并存储在combinedWatermark变量中。 */
 	private long combinedWatermark = Long.MIN_VALUE;
+	/** 二元输入算子中input1对应的Watermark大小 */
 	private long input1Watermark = Long.MIN_VALUE;
+	/** 二元输入算子中input2对应的Watermark大小 */
 	private long input2Watermark = Long.MIN_VALUE;
 
 	// ------------------------------------------------------------------------
@@ -679,6 +701,9 @@ public abstract class AbstractStreamOperator<OUT>
 	// ------------------------------------------------------------------------
 
 	// ------- One input stream
+	/** 用于处理在SourceOperator中产生的LatencyMarker信息。
+	 * 在当前Operator中会计算事件和LatencyMarker之间的差值，
+	 * 用于评估当前算子的延时程度 */
 	public void processLatencyMarker(LatencyMarker latencyMarker) throws Exception {
 		reportOrForwardLatencyMarker(latencyMarker);
 	}
@@ -766,6 +791,7 @@ public abstract class AbstractStreamOperator<OUT>
 	 * @param triggerable The {@link Triggerable} that should be invoked when timers fire
 	 *
 	 * @param <N> The type of the timer namespace.
+	 * 提供子类获取InternalTimerService的方法，以实现不同类型的Timer注册操作
 	 */
 	public <K, N> InternalTimerService<N> getInternalTimerService(
 			String name,
@@ -781,7 +807,7 @@ public abstract class AbstractStreamOperator<OUT>
 		TimerSerializer<K, N> timerSerializer = new TimerSerializer<>(keySerializer, namespaceSerializer);
 		return keyedTimeServiceHandler.getInternalTimerService(name, timerSerializer, triggerable);
 	}
-
+	/** 用于处理接入的Watermark时间戳信息，并用最新的Watermark更新当前算子内部的时钟 */
 	public void processWatermark(Watermark mark) throws Exception {
 		if (timeServiceManager != null) {
 			timeServiceManager.advanceWatermark(mark);

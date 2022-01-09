@@ -59,6 +59,8 @@ public interface StreamOperator<OUT> extends CheckpointListener, KeyContext, Dis
 	 * are opened from the tail operator to the head operator).
 	 *
 	 * @throws java.lang.Exception An exception in this method causes the operator to fail.
+	 *
+	 * 定义当前Operator的初始化方法，在数据元素正式接入Operator运算之前，Task会调用StreamOperator.open()方法对算子进行初始化。
 	 */
 	void open() throws Exception;
 
@@ -73,6 +75,7 @@ public interface StreamOperator<OUT> extends CheckpointListener, KeyContext, Dis
 	 * as failed, because the last data items are not processed properly.
 	 *
 	 * @throws java.lang.Exception An exception in this method causes the operator to fail.
+	 * 当所有的数据元素都添加到当前Operator时，就会调用该方法刷新所有剩余的缓冲数据，保证算子中所有数据被正确处理。
 	 */
 	void close() throws Exception;
 
@@ -107,6 +110,7 @@ public interface StreamOperator<OUT> extends CheckpointListener, KeyContext, Dis
 	 *
 	 * @param checkpointId The ID of the checkpoint.
 	 * @throws Exception Throwing an exception here causes the operator to fail and go into recovery.
+	 * 在StreamOperator正式执行checkpoint操作之前会调用该方法，目前仅有MapBundleOperator算子中使用该方法。
 	 */
 	void prepareSnapshotPreBarrier(long checkpointId) throws Exception;
 
@@ -117,6 +121,7 @@ public interface StreamOperator<OUT> extends CheckpointListener, KeyContext, Dis
 	 * the runnable might already be finished.
 	 *
 	 * @throws Exception exception that happened during snapshotting.
+	 * 当SubTask执行checkpoint操作时会调用该方法，用于触发该Operatior中状态数据的快照操作。
 	 */
 	OperatorSnapshotFutures snapshotState(
 		long checkpointId,
@@ -126,6 +131,7 @@ public interface StreamOperator<OUT> extends CheckpointListener, KeyContext, Dis
 
 	/**
 	 * Provides a context to initialize all state in the operator.
+	 * 当算子启动或重启时，调用该方法初始化状态数据，当恢复作用任务时，算子会从检查点（checkpoint）持久化的数据中恢复状态数据。
 	 */
 	void initializeState() throws Exception;
 

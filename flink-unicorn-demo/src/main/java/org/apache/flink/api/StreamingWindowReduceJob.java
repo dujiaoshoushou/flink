@@ -21,7 +21,7 @@ import org.apache.flink.util.Collector;
 public class StreamingWindowReduceJob {
 	public static void main(String[] args) throws Exception {
 		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-		int port = 9003;
+		int port = 8888;
 		String hostname = "localhost";
 		String delimiter = "\n";
 		//连接socket获取输入的数据

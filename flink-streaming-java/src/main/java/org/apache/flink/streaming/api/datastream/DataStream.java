@@ -1281,18 +1281,28 @@ public class DataStream<T> {
 			StreamOperatorFactory<R> operatorFactory) {
 
 		// read the output type of the input Transform to coax out errors about MissingTypeInfo
+		/**
+		 * 获取上一次转换操作输出的TypeInformation信息，确定没有出现MissingTypeInfo错误，
+		 * 以确保下游算子转换不会出现问题。
+		 */
 		transformation.getOutputType();
-
+		/**
+		 * 创建OneInputTransformation，包含当前DataStream对应的上一次转换操作。
+		 */
 		OneInputTransformation<T, R> resultTransform = new OneInputTransformation<>(
 				this.transformation,
 				operatorName,
 				operatorFactory,
 				outTypeInfo,
 				environment.getParallelism());
-
+		/**
+		 * 基于OneInputTransformation创建SingleOutputStreamOperator
+		 */
 		@SuppressWarnings({"unchecked", "rawtypes"})
 		SingleOutputStreamOperator<R> returnStream = new SingleOutputStreamOperator(environment, resultTransform);
-
+		/**
+		 * 将创建好的OneInputTransformation添加到StreamExecutionEnvironment的Transformation集合中，用于生成StreamGraph对象。
+		 */
 		getExecutionEnvironment().addOperator(resultTransform);
 
 		return returnStream;

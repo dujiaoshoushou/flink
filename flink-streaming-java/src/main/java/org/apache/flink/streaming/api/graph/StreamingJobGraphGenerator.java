@@ -149,24 +149,27 @@ public class StreamingJobGraphGenerator {
 		preValidate();
 
 		// make sure that all vertices start immediately
+		// 设置调度模式
 		jobGraph.setScheduleMode(streamGraph.getScheduleMode());
 
 		// Generate deterministic hashes for the nodes in order to identify them across
 		// submission iff they didn't change.
+		// 为每个节点生成确定的hash id 作为唯一标识，在提交和执行过程中保持不变
 		Map<Integer, byte[]> hashes = defaultStreamGraphHasher.traverseStreamGraphAndGenerateHashes(streamGraph);
 
 		// Generate legacy version hashes for backwards compatibility
+		// 为了向后保存兼容，为每个节点生成老版本的Hash id
 		List<Map<Integer, byte[]>> legacyHashes = new ArrayList<>(legacyStreamGraphHashers.size());
 		for (StreamGraphHasher hasher : legacyStreamGraphHashers) {
 			legacyHashes.add(hasher.traverseStreamGraphAndGenerateHashes(streamGraph));
 		}
 
 		Map<Integer, List<Tuple2<byte[], byte[]>>> chainedOperatorHashes = new HashMap<>();
-
+		// 真正对StreamGrap 进行转换，生成JobGraph图
 		setChaining(hashes, legacyHashes, chainedOperatorHashes);
 
 		setPhysicalEdges();
-
+		// 设置共享slotGroup
 		setSlotSharingAndCoLocation();
 
 		setManagedMemoryFraction(
@@ -175,15 +178,16 @@ public class StreamingJobGraphGenerator {
 			Collections.unmodifiableMap(chainedConfigs),
 			id -> streamGraph.getStreamNode(id).getMinResources(),
 			id -> streamGraph.getStreamNode(id).getManagedMemoryWeight());
-
+		// 配置checkpoint
 		configureCheckpointing();
 
 		jobGraph.setSavepointRestoreSettings(streamGraph.getSavepointRestoreSettings());
-
+		// 如果有之前的缓存文件配置，则重新读入
 		JobGraphGenerator.addUserArtifactEntries(streamGraph.getUserArtifacts(), jobGraph);
 
 		// set the ExecutionConfig last when it has been finalized
 		try {
+			 // 设置执行环境配置
 			jobGraph.setExecutionConfig(streamGraph.getExecutionConfig());
 		}
 		catch (IOException e) {
@@ -267,7 +271,9 @@ public class StreamingJobGraphGenerator {
 
 			List<StreamEdge> chainableOutputs = new ArrayList<StreamEdge>();
 			List<StreamEdge> nonChainableOutputs = new ArrayList<StreamEdge>();
-
+			/**
+			 * 获取当前节点的出边，判断边是否符合operatorchain的条件
+			 */
 			StreamNode currentNode = streamGraph.getStreamNode(currentNodeId);
 
 			for (StreamEdge outEdge : currentNode.getOutEdges()) {
@@ -277,12 +283,18 @@ public class StreamingJobGraphGenerator {
 					nonChainableOutputs.add(outEdge);
 				}
 			}
-
+			/**
+			 * 对chianable的变，递归调用createChain，
+			 * 返回值添加到transitiveOutEdges中
+			 */
 			for (StreamEdge chainable : chainableOutputs) {
 				transitiveOutEdges.addAll(
 						createChain(startNodeId, chainable.getTargetId(), hashes, legacyHashes, chainIndex + 1, chainedOperatorHashes));
 			}
-
+			/**
+			 * 对于无法chain在一起的边 ，边的下游节点作为OperatorChain的Head节点
+			 * 进行递归调用，返回值添加到transitiveOutEdges中
+			 */
 			for (StreamEdge nonChainable : nonChainableOutputs) {
 				transitiveOutEdges.add(nonChainable);
 				createChain(nonChainable.getTargetId(), nonChainable.getTargetId(), hashes, legacyHashes, 0, chainedOperatorHashes);
@@ -309,13 +321,20 @@ public class StreamingJobGraphGenerator {
 			if (currentNode.getOutputFormat() != null) {
 				getOrCreateFormatContainer(startNodeId).addOutputFormat(currentOperatorId, currentNode.getOutputFormat());
 			}
-
+			/**
+			 * 如果当前节点是起始节点，则直接创建JobVertex，否则返回一个空的StreamConfig
+			 */
 			StreamConfig config = currentNodeId.equals(startNodeId)
 					? createJobVertex(startNodeId, hashes, legacyHashes, chainedOperatorHashes)
 					: new StreamConfig(new Configuration());
-
+			/**
+			 * 将StreamNode中的配置信息序列化到StreamConfig中
+			 */
 			setVertexConfig(currentNodeId, config, chainableOutputs, nonChainableOutputs);
-
+			/**
+			 * 再次判断，如果是chain的起始节点，执行connect()方法，创建JobEdge和IntermediateDataSet
+			 * 否则将当前节点的StreamConfig添加到chainedConfig中
+			 */
 			if (currentNodeId.equals(startNodeId)) {
 
 				config.setChainStart();
