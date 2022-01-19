@@ -67,14 +67,15 @@ public class StreamSource<OUT, SRC extends SourceFunction<OUT>> extends Abstract
 			final StreamStatusMaintainer streamStatusMaintainer,
 			final Output<StreamRecord<OUT>> collector,
 			final OperatorChain<?, ?> operatorChain) throws Exception {
-
+		// 从OperatorConfig中获取TimeCharacteristic，并从Task的环境信息Environment中获取Configuration配置信息。
 		final TimeCharacteristic timeCharacteristic = getOperatorConfig().getTimeCharacteristic();
-
 		final Configuration configuration = this.getContainingTask().getEnvironment().getTaskManagerInfo().getConfiguration();
+		// 创建LatencyMarksEmitter实例，主要用于在SourceFunction中输出Latency标记，也就是周期性地生成时间戳。
+		// 当下游算子接收到SourceOperator发送LatencyMark后，会使用当前时间减去LatencyMark中的时间戳，以此确认该算子数据处理的延迟情况。
+		// 最后算子会将LatencyMark监控指标以Metric的形式发送到外部的监控系统中。
 		final long latencyTrackingInterval = getExecutionConfig().isLatencyTrackingConfigured()
 			? getExecutionConfig().getLatencyTrackingInterval()
 			: configuration.getLong(MetricOptions.LATENCY_INTERVAL);
-
 		LatencyMarksEmitter<OUT> latencyEmitter = null;
 		if (latencyTrackingInterval > 0) {
 			latencyEmitter = new LatencyMarksEmitter<>(
@@ -84,7 +85,7 @@ public class StreamSource<OUT, SRC extends SourceFunction<OUT>> extends Abstract
 				this.getOperatorID(),
 				getRuntimeContext().getIndexOfThisSubtask());
 		}
-
+		// 创建SourceContext，这里调用的是StreamSourceContexts.getSourceContext()方法，在该方法中根据timeCharacteristic参数创建对应类型SourceContext。
 		final long watermarkInterval = getRuntimeContext().getExecutionConfig().getAutoWatermarkInterval();
 
 		this.ctx = StreamSourceContexts.getSourceContext(
@@ -97,6 +98,7 @@ public class StreamSource<OUT, SRC extends SourceFunction<OUT>> extends Abstract
 			-1);
 
 		try {
+			// 调用userFunction.run(ctx)方法，调用和执行SourceFunction实例。
 			userFunction.run(ctx);
 
 			// if we get here, then the user function either exited after being done (finite source)

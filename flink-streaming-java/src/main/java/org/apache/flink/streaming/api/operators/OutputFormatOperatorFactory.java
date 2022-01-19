@@ -22,7 +22,8 @@ import org.apache.flink.api.common.io.OutputFormat;
 
 /**
  * Interface for operator factories which create the sink operator containing an {@link OutputFormat}.
- *
+ * 支持创建OutputFormat类型输出的StreamSink算子，即SinkFunction为OutputFormatSinkFunction类型，并且提供getOutputFormat()方法，
+ * 生成StreamGraph
  * @param <IN> The input type of the operator.
  */
 @Internal

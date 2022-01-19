@@ -41,23 +41,25 @@ import static java.util.Objects.requireNonNull;
  * function. This class handles the opening and closing of the user-defined functions,
  * as part of the operator life cycle.
  *
- * @param <OUT>
- *            The output type of the operator
- * @param <F>
- *            The type of the user function
+ * @param <OUT> The output type of the operator
+ * @param <F>   The type of the user function
  */
 @PublicEvolving
 public abstract class AbstractUdfStreamOperator<OUT, F extends Function>
-		extends AbstractStreamOperator<OUT>
-		implements OutputTypeConfigurable<OUT> {
+	extends AbstractStreamOperator<OUT>
+	implements OutputTypeConfigurable<OUT> {
 
 	private static final long serialVersionUID = 1L;
 
 
-	/** The user function. */
+	/**
+	 * The user function.
+	 */
 	protected final F userFunction;
 
-	/** Flag to prevent duplicate function.close() calls in close() and dispose(). */
+	/**
+	 * Flag to prevent duplicate function.close() calls in close() and dispose().
+	 */
 	private transient boolean functionsClosed = false;
 
 	public AbstractUdfStreamOperator(F userFunction) {
@@ -67,6 +69,7 @@ public abstract class AbstractUdfStreamOperator<OUT, F extends Function>
 
 	/**
 	 * Gets the user function executed in this operator.
+	 *
 	 * @return The user function of this operator.
 	 */
 	public F getUserFunction() {
@@ -80,25 +83,28 @@ public abstract class AbstractUdfStreamOperator<OUT, F extends Function>
 	@Override
 	public void setup(StreamTask<?, ?> containingTask, StreamConfig config, Output<StreamRecord<OUT>> output) {
 		super.setup(containingTask, config, output);
+		// 为userFunction 设定RuntimeContext，此时userFunction能够获取RuntimeContext变量，然后实现获取状态数据等操作
 		FunctionUtils.setFunctionRuntimeContext(userFunction, getRuntimeContext());
-
 	}
 
 	@Override
 	public void snapshotState(StateSnapshotContext context) throws Exception {
 		super.snapshotState(context);
+		// 实现对userFunction中的状态进行快照操作
 		StreamingFunctionUtils.snapshotFunctionState(context, getOperatorStateBackend(), userFunction);
 	}
 
 	@Override
 	public void initializeState(StateInitializationContext context) throws Exception {
 		super.initializeState(context);
+		// 初始化userFunction的状态值
 		StreamingFunctionUtils.restoreFunctionState(context, userFunction);
 	}
 
 	@Override
 	public void open() throws Exception {
 		super.open();
+		// 会调用RichFunction.open() 方法，完成用户自定状态的创建和初始化。
 		FunctionUtils.openFunction(userFunction, new Configuration());
 	}
 

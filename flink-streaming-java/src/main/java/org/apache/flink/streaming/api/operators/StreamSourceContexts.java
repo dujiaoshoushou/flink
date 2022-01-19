@@ -85,6 +85,7 @@ public class StreamSourceContexts {
 	/**
 	 * A source context that attached {@code -1} as a timestamp to all records, and that
 	 * does not forward watermarks.
+	 * 不支持基于事件时间的操作，仅实现了从外部数据源中读取数据并处理的逻辑，主要对应TimeCharacteristic为ProcessingTime的情况。
 	 */
 	private static class NonTimestampContext<T> implements SourceFunction.SourceContext<T> {
 
@@ -133,6 +134,7 @@ public class StreamSourceContexts {
 	/**
 	 * {@link SourceFunction.SourceContext} to be used for sources with automatic timestamps
 	 * and watermark emission.
+	 * 处理接入时间即IngestionTime
 	 */
 	private static class AutomaticWatermarkContext<T> extends WatermarkContext<T> {
 
@@ -281,6 +283,7 @@ public class StreamSourceContexts {
 	 *
 	 * <p>Streaming topologies can use timestamp assigner functions to override the timestamps
 	 * assigned here.
+	 * 处理事件时间即EventTime
 	 */
 	private static class ManualWatermarkContext<T> extends WatermarkContext<T> {
 
@@ -335,6 +338,7 @@ public class StreamSourceContexts {
 	 * between 2 consecutive checks, it determines the source to be IDLE and correspondingly
 	 * toggles the status. ACTIVE status resumes as soon as some record or watermark is collected
 	 * again.
+	 * 支持事件时间抽取和生成Watermark，最终用于处理乱序事件。
 	 */
 	private abstract static class WatermarkContext<T> implements SourceFunction.SourceContext<T> {
 
@@ -405,7 +409,7 @@ public class StreamSourceContexts {
 				} else {
 					scheduleNextIdleDetectionTask();
 				}
-
+				// TODO:抽取TimeStamp信息
 				processAndCollectWithTimestamp(element, timestamp);
 			}
 		}
@@ -421,7 +425,7 @@ public class StreamSourceContexts {
 					} else {
 						scheduleNextIdleDetectionTask();
 					}
-
+					// TODO:处理并发送Watermark至下游算子
 					processAndEmitWatermark(mark);
 				}
 			}

@@ -23,6 +23,9 @@ import org.apache.flink.core.io.InputSplit;
 
 /**
  * Input format source operator factory.
+ * 支持创建InputFormat类型输入的StreamSource算子，
+ * 即SourceFunction为InputFormatSourceFunction类型，
+ * 并提供getInputFormat()方法生成StreamGraph。
  *
  * @param <OUT> The output type of the operator
  */

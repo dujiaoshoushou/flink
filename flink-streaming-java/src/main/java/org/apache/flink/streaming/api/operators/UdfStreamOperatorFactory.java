@@ -22,6 +22,8 @@ import org.apache.flink.api.common.functions.Function;
 
 /**
  * Udf stream operator factory.
+ * 支持AbstractUdfStreamOperator类型的Operator创建，
+ * 并且在UdfStreamOperatorFactory中提供了获取UserFunction的方法。
  *
  * @param <OUT> The output type of the operator
  */

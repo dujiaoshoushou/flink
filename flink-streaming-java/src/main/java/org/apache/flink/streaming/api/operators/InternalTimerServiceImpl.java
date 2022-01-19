@@ -269,7 +269,7 @@ public class InternalTimerServiceImpl<K, N> implements InternalTimerService<N> {
 		currentWatermark = time;
 
 		InternalTimer<K, N> timer;
-
+		//
 		while ((timer = eventTimeTimersQueue.peek()) != null && timer.getTimestamp() <= time) {
 			eventTimeTimersQueue.poll();
 			keyContext.setCurrentKey(timer.getKey());

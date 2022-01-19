@@ -44,6 +44,8 @@ public class RebalancePartitioner<T> extends StreamPartitioner<T> {
 
 	@Override
 	public int selectChannel(SerializationDelegate<StreamRecord<T>> record) {
+		// TODO 获取下一个数据需要发送的InputChannel的算法
+		// TODO 实际上是对所有下游的InputChannel进行轮询，均匀地将数据发送到下游的Task。
 		nextChannelToSendTo = (nextChannelToSendTo + 1) % numberOfChannels;
 		return nextChannelToSendTo;
 	}

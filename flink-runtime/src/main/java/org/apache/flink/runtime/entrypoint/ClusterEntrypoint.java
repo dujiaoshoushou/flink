@@ -204,14 +204,14 @@ public abstract class ClusterEntrypoint implements AutoCloseableAsync, FatalErro
 
 	private void runCluster(Configuration configuration) throws Exception {
 		synchronized (lock) {
-			initializeServices(configuration);
+			initializeServices(configuration); // 初始化集群需要的基础服务组件
 
-			// write host information into configuration
+			// write host information into configuration，将创建和初始化RPC服务地址和端口配置写入configuration。
 			configuration.setString(JobManagerOptions.ADDRESS, commonRpcService.getAddress());
 			configuration.setInteger(JobManagerOptions.PORT, commonRpcService.getPort());
-
+			// 创建对应集群的DispatcherResourceManagerComponentFactory
 			final DispatcherResourceManagerComponentFactory dispatcherResourceManagerComponentFactory = createDispatcherResourceManagerComponentFactory(configuration);
-
+			// 创建调度程序资源管理器组件clusterComponent，也就是运行时中使用的组件服务。
 			clusterComponent = dispatcherResourceManagerComponentFactory.create(
 				configuration,
 				ioExecutor,
@@ -223,7 +223,7 @@ public abstract class ClusterEntrypoint implements AutoCloseableAsync, FatalErro
 				archivedExecutionGraphStore,
 				new RpcMetricQueryServiceRetriever(metricRegistry.getMetricQueryServiceRpcService()),
 				this);
-
+			// 向clusterComponent的ShutDownFuture对象中添加需要在集群停止后执行的异步操作。
 			clusterComponent.getShutDownFuture().whenComplete(
 				(ApplicationStatus applicationStatus, Throwable throwable) -> {
 					if (throwable != null) {
@@ -243,11 +243,18 @@ public abstract class ClusterEntrypoint implements AutoCloseableAsync, FatalErro
 		}
 	}
 
+	/**
+	 * 初始化运行时集群需要创建的基础组件服务
+	 * @param configuration
+	 * @throws Exception
+	 */
 	protected void initializeServices(Configuration configuration) throws Exception {
 
 		LOG.info("Initializing cluster services.");
 
 		synchronized (lock) {
+			// TODO 从configuration获取配置的RPC地址和portRange参数，根据配置地址和端口信息创建集群所需的公用
+			// TODO commmonRpcService服务。更新configuration中的address和port配置，用于支持集群组件高可用服务。
 			final String bindAddress = configuration.getString(JobManagerOptions.ADDRESS);
 			final String portRange = getRPCPortRange(configuration);
 
@@ -256,14 +263,19 @@ public abstract class ClusterEntrypoint implements AutoCloseableAsync, FatalErro
 			// update the configuration used to create the high availability services
 			configuration.setString(JobManagerOptions.ADDRESS, commonRpcService.getAddress());
 			configuration.setInteger(JobManagerOptions.PORT, commonRpcService.getPort());
-
+			// TODO 创建ioExecutor线程池，用于集群组件的I/O操作，如本地文件数据读取和输出等。
 			ioExecutor = Executors.newFixedThreadPool(
 				Hardware.getNumberCPUCores(),
 				new ExecutorThreadFactory("cluster-io"));
+			// TODO 创建并启动haService，向集群组件提供高可用支持，集群中的组件都会通过haService创建高可用服务。
 			haServices = createHaServices(configuration, ioExecutor);
+			// TODO 创建并启动blobServer，存储集群需要的Blob对象数据，blobServer中存储的数据能被JobManager以及TaskManager访问，
+			// TODO 例如JobGraph中的JAR包等数据。
 			blobServer = new BlobServer(configuration, haServices.createBlobStore());
 			blobServer.start();
+			// TODO 创建heartbeatServices，主要用于创建集群组件之间的心跳检测，例如ResourceManager与JobManager之间的心跳服务。
 			heartbeatServices = createHeartbeatServices(configuration);
+			// TODO 注册metricRegistry服务用于注册集群监控指标收集。
 			metricRegistry = createMetricRegistry(configuration);
 
 			final RpcService metricQueryServiceRpcService = MetricUtils.startMetricsRpcService(configuration, bindAddress);
@@ -275,7 +287,7 @@ public abstract class ClusterEntrypoint implements AutoCloseableAsync, FatalErro
 				metricRegistry,
 				hostname,
 				ConfigurationUtils.getSystemResourceMetricsProbingInterval(configuration));
-
+			// TODO 创建archivedExecutionGraphStore服务，用于压缩并存储集群的ExecutionGraph，主要有FileArchivedExecutionGraphStroe 和 MemoryArchivedExecutionGraphStore两种实现类型。
 			archivedExecutionGraphStore = createSerializableExecutionGraphStore(configuration, commonRpcService.getScheduledExecutor());
 		}
 	}
@@ -515,7 +527,7 @@ public abstract class ClusterEntrypoint implements AutoCloseableAsync, FatalErro
 
 		final String clusterEntrypointName = clusterEntrypoint.getClass().getSimpleName();
 		try {
-			clusterEntrypoint.startCluster();
+			clusterEntrypoint.startCluster(); // 启动集群
 		} catch (ClusterEntrypointException e) {
 			LOG.error(String.format("Could not start cluster entrypoint %s.", clusterEntrypointName), e);
 			System.exit(STARTUP_FAILURE_RETURN_CODE);

@@ -197,6 +197,7 @@ public interface SourceFunction<T> extends Function, Serializable {
 		 * </ul>
 		 *
 		 * @param element The element to emit
+		 * 用于收集从外部数据源读取的数据并下发到下游算子中
 		 */
 		void collect(T element);
 
@@ -219,6 +220,7 @@ public interface SourceFunction<T> extends Function, Serializable {
 		 *
 		 * @param element The element to emit
 		 * @param timestamp The timestamp in milliseconds since the Epoch
+		 * 支持直接收集数据元素以及EventTime时间戳
 		 */
 		@PublicEvolving
 		void collectWithTimestamp(T element, long timestamp);
@@ -234,6 +236,7 @@ public interface SourceFunction<T> extends Function, Serializable {
 		 * automatic ingestion time watermarks.
 		 *
 		 * @param mark The Watermark to emit
+		 * 用于在SourceFunction中生成Watermark并发送到下游算子进行处理。
 		 */
 		@PublicEvolving
 		void emitWatermark(Watermark mark);
@@ -249,6 +252,7 @@ public interface SourceFunction<T> extends Function, Serializable {
 		 * acknowledge themselves to be idle. The system will consider the source to resume activity
 		 * again once {@link SourceContext#collect(T)}, {@link SourceContext#collectWithTimestamp(T, long)},
 		 * or {@link SourceContext#emitWatermark(Watermark)} is called to emit elements or watermarks from the source.
+		 *
 		 */
 		@PublicEvolving
 		void markAsTemporarilyIdle();
@@ -259,6 +263,8 @@ public interface SourceFunction<T> extends Function, Serializable {
 		 * source.
 		 *
 		 * @return The object to use as the lock
+		 * 用于获取检查点锁(Checkpoint Lock),例如使用KafkaConsumer读取数据时，可以使用检查点锁，
+		 * 确保记录发出的原子性和偏移状态更新。
 		 */
 		Object getCheckpointLock();
 

@@ -66,19 +66,19 @@ public class SlidingEventTimeWindows extends WindowAssigner<Object, TimeWindow> 
 
 	@Override
 	public Collection<TimeWindow> assignWindows(Object element, long timestamp, WindowAssignerContext context) {
-		if (timestamp > Long.MIN_VALUE) {
-			List<TimeWindow> windows = new ArrayList<>((int) (size / slide));
-			long lastStart = TimeWindow.getWindowStartWithOffset(timestamp, offset, slide);
+		if (timestamp > Long.MIN_VALUE) { // 判断timestamp是否有效
+			List<TimeWindow> windows = new ArrayList<>((int) (size / slide));// 根据窗口长度和滑动时间计算数据元素所属窗口的数量，在根据窗口数量创建窗口和列表。
+			long lastStart = TimeWindow.getWindowStartWithOffset(timestamp, offset, slide); // 确定窗口列表中最晚窗口对应的WindowStart时间，并赋值给lastStart变量。
 			for (long start = lastStart;
-				start > timestamp - size;
-				start -= slide) {
+				 start > timestamp - size;
+				 start -= slide) { // 从lastStart开始遍历，每次向前移动固定的slide长度，最后向windows窗口列表中添加创建的TimeWindow，在TimeWindow中需要指定窗口的起始时间和结束时间。
 				windows.add(new TimeWindow(start, start + size));
 			}
-			return windows;
+			return windows; // 返回创建的窗口列表windows，也就是当前数据元素所属的窗口列表。
 		} else {
 			throw new RuntimeException("Record has Long.MIN_VALUE timestamp (= no timestamp marker). " +
-					"Is the time characteristic set to 'ProcessingTime', or did you forget to call " +
-					"'DataStream.assignTimestampsAndWatermarks(...)'?");
+				"Is the time characteristic set to 'ProcessingTime', or did you forget to call " +
+				"'DataStream.assignTimestampsAndWatermarks(...)'?");
 		}
 	}
 
@@ -104,7 +104,7 @@ public class SlidingEventTimeWindows extends WindowAssigner<Object, TimeWindow> 
 	 * Creates a new {@code SlidingEventTimeWindows} {@link WindowAssigner} that assigns
 	 * elements to sliding time windows based on the element timestamp.
 	 *
-	 * @param size The size of the generated windows.
+	 * @param size  The size of the generated windows.
 	 * @param slide The slide interval of the generated windows.
 	 * @return The time policy.
 	 */
@@ -125,7 +125,7 @@ public class SlidingEventTimeWindows extends WindowAssigner<Object, TimeWindow> 
 	 * and window begins at every 00:00:00 of local time,you may use {@code of(Time.days(1),Time.hours(-8))}.
 	 * The parameter of offset is {@code Time.hours(-8))} since UTC+08:00 is 8 hours earlier than UTC time.
 	 *
-	 * @param size The size of the generated windows.
+	 * @param size   The size of the generated windows.
 	 * @param slide  The slide interval of the generated windows.
 	 * @param offset The offset which window start would be shifted by.
 	 * @return The time policy.

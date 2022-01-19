@@ -48,13 +48,28 @@ public class SimpleOperatorFactory<OUT> implements StreamOperatorFactory<OUT> {
 			return null;
 		} else if (operator instanceof StreamSource &&
 				((StreamSource) operator).getUserFunction() instanceof InputFormatSourceFunction) {
+			/**
+			 * 如果operator是StreamSource且UserFunction类型为InputFormatSourceFunction
+			 * 返回SimpleInputFormatOperatorFactory
+			 */
 			return new SimpleInputFormatOperatorFactory<OUT>((StreamSource) operator);
 		} else if (operator instanceof StreamSink &&
 			((StreamSink) operator).getUserFunction() instanceof OutputFormatSinkFunction) {
+			/**
+			 * 如果operator是StreamSink且UserFunction类型为OutputFormatSinkFunction
+			 * 返回SimpleOutputFormatOperatorFactory
+			 */
 			return new SimpleOutputFormatOperatorFactory<>((StreamSink) operator);
 		} else if (operator instanceof AbstractUdfStreamOperator) {
+			/**
+			 * 如果operator是AbstractUdfStreamOperator
+			 * 返回SimpleUdfStreamOperatorFactory
+			 */
 			return new SimpleUdfStreamOperatorFactory<OUT>((AbstractUdfStreamOperator) operator);
 		} else {
+			/**
+			 * 其他情况返回SimpleOperatorFactory
+			 */
 			return new SimpleOperatorFactory<>(operator);
 		}
 	}

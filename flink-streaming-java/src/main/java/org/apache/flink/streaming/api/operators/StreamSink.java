@@ -71,25 +71,25 @@ public class StreamSink<IN> extends AbstractUdfStreamOperator<Object, SinkFuncti
 	}
 
 	private class SimpleContext<IN> implements SinkFunction.Context<IN> {
-
+		// 处理数据
 		private StreamRecord<IN> element;
-
+		// 时间服务
 		private final ProcessingTimeService processingTimeService;
 
 		public SimpleContext(ProcessingTimeService processingTimeService) {
 			this.processingTimeService = processingTimeService;
 		}
-
+		// 获取当前处理时间
 		@Override
 		public long currentProcessingTime() {
 			return processingTimeService.getCurrentProcessingTime();
 		}
-
+		// 获取当前Watermark
 		@Override
 		public long currentWatermark() {
 			return currentWatermark;
 		}
-
+		// 获取数据中的Timestamp
 		@Override
 		public Long timestamp() {
 			if (element.hasTimestamp()) {

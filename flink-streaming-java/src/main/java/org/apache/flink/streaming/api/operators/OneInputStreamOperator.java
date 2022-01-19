@@ -37,16 +37,23 @@ public interface OneInputStreamOperator<IN, OUT> extends StreamOperator<OUT> {
 	/**
 	 * Processes one element that arrived at this operator.
 	 * This method is guaranteed to not be called concurrently with other methods of the operator.
+	 * 处理输入数据元素的方法
 	 */
 	void processElement(StreamRecord<IN> element) throws Exception;
 
 	/**
 	 * Processes a {@link Watermark}.
 	 * This method is guaranteed to not be called concurrently with other methods of the operator.
+	 * 处理Watermark的方法
 	 *
 	 * @see org.apache.flink.streaming.api.watermark.Watermark
 	 */
 	void processWatermark(Watermark mark) throws Exception;
 
+	/**
+	 * 处理延时标记的方法
+	 * @param latencyMarker
+	 * @throws Exception
+	 */
 	void processLatencyMarker(LatencyMarker latencyMarker) throws Exception;
 }

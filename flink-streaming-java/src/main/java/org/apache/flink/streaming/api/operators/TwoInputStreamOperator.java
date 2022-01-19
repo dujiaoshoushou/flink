@@ -38,12 +38,14 @@ public interface TwoInputStreamOperator<IN1, IN2, OUT> extends StreamOperator<OU
 	/**
 	 * Processes one element that arrived on the first input of this two-input operator.
 	 * This method is guaranteed to not be called concurrently with other methods of the operator.
+	 * 处理输入源1的数据元素方法
 	 */
 	void processElement1(StreamRecord<IN1> element) throws Exception;
 
 	/**
 	 * Processes one element that arrived on the second input of this two-input operator.
 	 * This method is guaranteed to not be called concurrently with other methods of the operator.
+	 * 处理输入源2的数据元素方法
 	 */
 	void processElement2(StreamRecord<IN2> element) throws Exception;
 
@@ -52,6 +54,7 @@ public interface TwoInputStreamOperator<IN1, IN2, OUT> extends StreamOperator<OU
 	 * This method is guaranteed to not be called concurrently with other methods of the operator.
 	 *
 	 * @see org.apache.flink.streaming.api.watermark.Watermark
+	 * 处理输入源1的Watermark方法
 	 */
 	void processWatermark1(Watermark mark) throws Exception;
 
@@ -60,6 +63,7 @@ public interface TwoInputStreamOperator<IN1, IN2, OUT> extends StreamOperator<OU
 	 * This method is guaranteed to not be called concurrently with other methods of the operator.
 	 *
 	 * @see org.apache.flink.streaming.api.watermark.Watermark
+	 * 处理输入源2的Watermark方法
 	 */
 	void processWatermark2(Watermark mark) throws Exception;
 
@@ -68,6 +72,7 @@ public interface TwoInputStreamOperator<IN1, IN2, OUT> extends StreamOperator<OU
 	 * This method is guaranteed to not be called concurrently with other methods of the operator.
 	 *
 	 * @see org.apache.flink.streaming.runtime.streamrecord.LatencyMarker
+	 * 处理输入源1的LatencyMarker方法
 	 */
 	void processLatencyMarker1(LatencyMarker latencyMarker) throws Exception;
 
@@ -76,6 +81,7 @@ public interface TwoInputStreamOperator<IN1, IN2, OUT> extends StreamOperator<OU
 	 * This method is guaranteed to not be called concurrently with other methods of the operator.
 	 *
 	 * @see org.apache.flink.streaming.runtime.streamrecord.LatencyMarker
+	 * 处理输入源2的LatencyMarker方法
 	 */
 	void processLatencyMarker2(LatencyMarker latencyMarker) throws Exception;
 

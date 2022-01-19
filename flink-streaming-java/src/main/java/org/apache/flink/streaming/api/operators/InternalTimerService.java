@@ -32,31 +32,39 @@ import org.apache.flink.util.function.BiConsumerWithException;
 @Internal
 public interface InternalTimerService<N> {
 
-	/** Returns the current processing time. */
+	/** Returns the current processing time.
+	 * 获取当前的处理时间
+	 * */
 	long currentProcessingTime();
 
-	/** Returns the current event-time watermark. */
+	/** Returns the current event-time watermark.
+	 * 获取当前算子基于事件时间的Watermark
+	 * */
 	long currentWatermark();
 
 	/**
 	 * Registers a timer to be fired when processing time passes the given time. The namespace
 	 * you pass here will be provided when the timer fires.
+	 * 注册基于处理时间的定时器
 	 */
 	void registerProcessingTimeTimer(N namespace, long time);
 
 	/**
 	 * Deletes the timer for the given key and namespace.
+	 * 删除基于处理时间的定时器
 	 */
 	void deleteProcessingTimeTimer(N namespace, long time);
 
 	/**
 	 * Registers a timer to be fired when event time watermark passes the given time. The namespace
 	 * you pass here will be provided when the timer fires.
+	 * 注册基于事件时间的定时器
 	 */
 	void registerEventTimeTimer(N namespace, long time);
 
 	/**
 	 * Deletes the timer for the given key and namespace.
+	 * 删除基于事件时间的定时器
 	 */
 	void deleteEventTimeTimer(N namespace, long time);
 

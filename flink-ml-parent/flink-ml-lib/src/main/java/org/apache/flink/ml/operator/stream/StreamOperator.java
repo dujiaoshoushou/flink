@@ -35,6 +35,7 @@ public abstract class StreamOperator<T extends StreamOperator<T>> extends AlgoOp
 		super();
 	}
 
+
 	/**
 	 * The constructor of StreamOperator with {@link Params}.
 	 *

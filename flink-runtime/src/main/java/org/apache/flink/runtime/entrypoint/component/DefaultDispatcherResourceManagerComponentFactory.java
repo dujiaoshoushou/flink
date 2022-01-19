@@ -119,30 +119,43 @@ public class DefaultDispatcherResourceManagerComponentFactory implements Dispatc
 		DispatcherRunner dispatcherRunner = null;
 
 		try {
+			/**
+			 * 步骤一：获取集群HA Leader 恢复服务及创建组件Gateway
+			 *   先从highAvailabilityServices中获取dispatcherLeaderRetrievalService和resourceManagerRetrievalService，
+			 *   分别用于创建dispatcherGatewayRetriever和resourceManagerGatewayRetriever。这里的GatewayRetriever组件用于获取
+			 *   指定集群组件Gateway当前活跃的Leader地址，避免因为集群RPC组件服务宕机，Gateway发生切换而导致其他组件服务无法正常通信的问题。
+			 */
+			// TODO 获取dispatcherLeaderRetrievalService
 			dispatcherLeaderRetrievalService = highAvailabilityServices.getDispatcherLeaderRetriever();
-
+			// TODO 获取resourceManagerRetrievalService
 			resourceManagerRetrievalService = highAvailabilityServices.getResourceManagerLeaderRetriever();
-
+			// TODO 创建dispatcherGatewayRetriever
 			final LeaderGatewayRetriever<DispatcherGateway> dispatcherGatewayRetriever = new RpcGatewayRetriever<>(
 				rpcService,
 				DispatcherGateway.class,
 				DispatcherId::fromUuid,
 				10,
 				Time.milliseconds(50L));
-
+			// TODO 创建resourceManagerGatewayRetriever
 			final LeaderGatewayRetriever<ResourceManagerGateway> resourceManagerGatewayRetriever = new RpcGatewayRetriever<>(
 				rpcService,
 				ResourceManagerGateway.class,
 				ResourceManagerId::fromUuid,
 				10,
 				Time.milliseconds(50L));
-
+			/**
+			 * 步骤二 创建和启动WebMonitorEndpoint
+			 *   创建WebMonitorEndpoint组件。WebMonitorEndpoint是前端页面访问Web后端服务接口的提供者，通过WebMonitorEndpoint提供的Restful接口
+			 *   可以查看集群整体监控信息、获取任务执行状态。
+			 */
+			// TODO 创建ExecutorService，用于处理web请求时的多线程服务。
 			final ExecutorService executor = WebMonitorEndpoint.createExecutorService(
 				configuration.getInteger(RestOptions.SERVER_NUM_THREADS),
 				configuration.getInteger(RestOptions.SERVER_THREAD_PRIORITY),
 				"DispatcherRestEndpoint");
-
+			// TODO 获取updateInterval参数，也就是Web页面获取一次监控指标的间隔时间。
 			final long updateInterval = configuration.getLong(MetricOptions.METRIC_FETCHER_UPDATE_INTERVAL);
+			// TODO 获取MetricFetcher，用于获取Metric指标
 			final MetricFetcher metricFetcher = updateInterval == 0
 				? VoidMetricFetcher.INSTANCE
 				: MetricFetcherImpl.fromConfiguration(
@@ -150,7 +163,7 @@ public class DefaultDispatcherResourceManagerComponentFactory implements Dispatc
 					metricQueryServiceRetriever,
 					dispatcherGatewayRetriever,
 					executor);
-
+			// TODO 创建webMonitorEndpoint
 			webMonitorEndpoint = restEndpointFactory.createRestEndpoint(
 				configuration,
 				dispatcherGatewayRetriever,
@@ -162,11 +175,16 @@ public class DefaultDispatcherResourceManagerComponentFactory implements Dispatc
 				fatalErrorHandler);
 
 			log.debug("Starting Dispatcher REST endpoint.");
+			// TODO 启动创建好的webMonitorEndpoint
 			webMonitorEndpoint.start();
 
 			final String hostname = RpcUtils.getHostname(rpcService);
-
+			/**
+			 * 步骤四 创建和启动resourceManager
+			 */
+			// TODO 创建resourceManagerMetricGroup，用于采集ResourceManager相关的监控指标。
 			resourceManagerMetricGroup = ResourceManagerMetricGroup.create(metricRegistry, hostname);
+			// TODO 调用resourceManagerFactory.createResourceManager()方法创建resourceManager组件
 			resourceManager = resourceManagerFactory.createResourceManager(
 				configuration,
 				ResourceID.generate(),
@@ -177,9 +195,13 @@ public class DefaultDispatcherResourceManagerComponentFactory implements Dispatc
 				new ClusterInformation(hostname, blobServer.getPort()),
 				webMonitorEndpoint.getRestBaseUrl(),
 				resourceManagerMetricGroup);
-
+			/**
+			 * 步骤三 创建和启动DispatcherRunner
+			 */
+			// TODO 创建HistoryServerArchivist，用于在History Server上对指定的AccessExecutionGraph进行历史归档。
 			final HistoryServerArchivist historyServerArchivist = HistoryServerArchivist.createHistoryServerArchivist(configuration, webMonitorEndpoint);
-
+			// TODO 创建PartialDispatcherServices，用于提供Dispatcher组件使用的一部分服务，包括高可用、blobServer等。
+			// TODO 之所以叫做PartialDispatcherServices，是因为Dispatcher还有其他服务会在后续执行过程中启动。
 			final PartialDispatcherServices partialDispatcherServices = new PartialDispatcherServices(
 				configuration,
 				highAvailabilityServices,
@@ -193,6 +215,8 @@ public class DefaultDispatcherResourceManagerComponentFactory implements Dispatc
 				metricRegistry.getMetricQueryServiceGatewayRpcAddress());
 
 			log.debug("Starting Dispatcher.");
+			// TODO 调用dispatcherRunnerFactory.createDispatcherRunner()方法创建DispatcherRunner对象。
+			// TODO 创建参数，包括前面创建的所有参数信息，而DispatcherRunner会在后面被leaderElectionService服务启动和执行。
 			dispatcherRunner = dispatcherRunnerFactory.createDispatcherRunner(
 				highAvailabilityServices.getDispatcherLeaderElectionService(),
 				fatalErrorHandler,
@@ -202,11 +226,16 @@ public class DefaultDispatcherResourceManagerComponentFactory implements Dispatc
 				partialDispatcherServices);
 
 			log.debug("Starting ResourceManager.");
+			// TODO 启动resourceManager组件。
 			resourceManager.start();
-
+			/**
+			 * 步骤五：使用高可用服务启动组件Gateway
+			 */
 			resourceManagerRetrievalService.start(resourceManagerGatewayRetriever);
 			dispatcherLeaderRetrievalService.start(dispatcherGatewayRetriever);
-
+			/**
+			 * 步骤六：返回DispatcherResourceManagerComponent对象。
+			 */
 			return new DispatcherResourceManagerComponent(
 				dispatcherRunner,
 				resourceManager,

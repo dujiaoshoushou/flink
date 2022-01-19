@@ -33,10 +33,18 @@ public class EventTimeTrigger extends Trigger<Object, TimeWindow> {
 
 	private EventTimeTrigger() {}
 
+	/**
+	 * 1. 当前数据元素接入后，根据窗口中maxTimestamp是否大于当前算子中的Watermark觉得是否触发窗口计算。
+	 * 如果符合触发条件，则返回TriggerResult.FIRE事件，这里的maxTimestamp实际上是窗口的结束时间减1，属于该窗口的最大时间戳。
+	 * 2. 如果不满足以上条件，就会继续向TriggerContext中注册Timer定时器，等待指定时间再通过定时器触发窗口计算，
+	 * 此时方法会返回TriggerResult.CONTINUE消息给WindowOperator，表示此时窗口不会触发计算，继续等待新的数据接入。
+	 * 3. 当数据元素不断接入WindowOperator，不断更新Watermark时，只要Watermark大于窗口的右边界就会触发相应的窗口计算。
+	 */
 	@Override
 	public TriggerResult onElement(Object element, long timestamp, TimeWindow window, TriggerContext ctx) throws Exception {
 		if (window.maxTimestamp() <= ctx.getCurrentWatermark()) {
 			// if the watermark is already past the window fire immediately
+			// 如果Watermark超过窗口最大时间戳，则立即执行。
 			return TriggerResult.FIRE;
 		} else {
 			ctx.registerEventTimeTimer(window.maxTimestamp());
