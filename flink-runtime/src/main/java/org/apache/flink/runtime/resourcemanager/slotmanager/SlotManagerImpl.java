@@ -221,16 +221,16 @@ public class SlotManagerImpl implements SlotManager {
 		this.resourceManagerId = Preconditions.checkNotNull(newResourceManagerId);
 		mainThreadExecutor = Preconditions.checkNotNull(newMainThreadExecutor);
 		resourceActions = Preconditions.checkNotNull(newResourceActions);
-
+		// TODO 将SlotManager启动标记设为True。
 		started = true;
-
+		// TODO 启动TaskManager周期性超时检查线程服务，实际上是checkTaskManagerTimeouts()方法实现该检查，防止TaskManager长时间掉线等问题。
 		taskManagerTimeoutCheck = scheduledExecutor.scheduleWithFixedDelay(
 			() -> mainThreadExecutor.execute(
 				() -> checkTaskManagerTimeouts()),
 			0L,
 			taskManagerTimeout.toMilliseconds(),
 			TimeUnit.MILLISECONDS);
-
+		// TODO 启动单独的线程提交的SlotRequest进行周期性超时检查，防止Slot请求超时。
 		slotRequestTimeoutCheck = scheduledExecutor.scheduleWithFixedDelay(
 			() -> mainThreadExecutor.execute(
 				() -> checkSlotRequestTimeouts()),

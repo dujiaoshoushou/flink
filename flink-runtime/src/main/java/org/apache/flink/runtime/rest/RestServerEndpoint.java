@@ -131,13 +131,14 @@ public abstract class RestServerEndpoint implements AutoCloseableAsync {
 	 */
 	public final void start() throws Exception {
 		synchronized (lock) {
+			// TODO 检查ResetServerEndpoint.state是否为CREATE
 			Preconditions.checkState(state == State.CREATED, "The RestServerEndpoint cannot be restarted.");
-
+			// TODO 启动Rest Endpoint
 			log.info("Starting rest endpoint.");
 
 			final Router router = new Router();
 			final CompletableFuture<String> restAddressFuture = new CompletableFuture<>();
-
+			// TODO 调用initializeHandlers方法初始化子类注册的Handlers，例如WebMonitorEndpoint中的Handler实现。
 			handlers = initializeHandlers(restAddressFuture);
 
 			/* sort the handlers such that they are ordered the following:
@@ -147,18 +148,20 @@ public abstract class RestServerEndpoint implements AutoCloseableAsync {
 			 * /jobs/:jobid/config
 			 * /:*
 			 */
+			// TODO handlers进行排序处理
 			Collections.sort(
 				handlers,
 				RestHandlerUrlComparator.INSTANCE);
-
+			// TODO 调用registerHandler()方法
 			handlers.forEach(handler -> {
 				registerHandler(router, handler, log);
 			});
-
+			// TODO 创建ChannelInitializer，初始化Channel
 			ChannelInitializer<SocketChannel> initializer = new ChannelInitializer<SocketChannel>() {
 
 				@Override
 				protected void initChannel(SocketChannel ch) {
+					// TODO 创建路由RouterHandler，完成业务请求拦截
 					RouterHandler handler = new RouterHandler(router, responseHeaders);
 
 					// SSL should be the first handler in the pipeline
@@ -176,16 +179,17 @@ public abstract class RestServerEndpoint implements AutoCloseableAsync {
 						.addLast(new PipelineErrorHandler(log, responseHeaders));
 				}
 			};
-
+			// TODO 创建bossGroup 和 workGroup
 			NioEventLoopGroup bossGroup = new NioEventLoopGroup(1, new ExecutorThreadFactory("flink-rest-server-netty-boss"));
 			NioEventLoopGroup workerGroup = new NioEventLoopGroup(0, new ExecutorThreadFactory("flink-rest-server-netty-worker"));
-
+			// TODO 创建ServerBootStrap启动类
 			bootstrap = new ServerBootstrap();
+			// TODO 绑定创建的bossGroup和workGroup的Initializer
 			bootstrap
 				.group(bossGroup, workerGroup)
 				.channel(NioServerSocketChannel.class)
 				.childHandler(initializer);
-
+			// TODO 从restBindPortRange选择端口
 			Iterator<Integer> portsIterator;
 			try {
 				portsIterator = NetUtils.getPortRangeFromString(restBindPortRange);
@@ -194,7 +198,7 @@ public abstract class RestServerEndpoint implements AutoCloseableAsync {
 			} catch (Exception e) {
 				throw new IllegalArgumentException("Invalid port range definition: " + restBindPortRange);
 			}
-
+			// TODO portsIterator选择没有被占用的端口，作为bootstrap启动的端口。
 			int chosenPort = 0;
 			while (portsIterator.hasNext()) {
 				try {
@@ -205,6 +209,7 @@ public abstract class RestServerEndpoint implements AutoCloseableAsync {
 					} else {
 						channel = bootstrap.bind(restBindAddress, chosenPort);
 					}
+					// netty启动bootstrap服务
 					serverChannel = channel.syncUninterruptibly().channel();
 					break;
 				} catch (final Exception e) {
@@ -218,7 +223,7 @@ public abstract class RestServerEndpoint implements AutoCloseableAsync {
 			if (serverChannel == null) {
 				throw new BindException("Could not start rest endpoint on any port in port range " + restBindPortRange);
 			}
-
+			// TODO ServerBootstrap启动成功，输出restBindAddress 和 chosenPort
 			log.debug("Binding rest endpoint to {}:{}.", restBindAddress, chosenPort);
 
 			final InetSocketAddress bindAddress = (InetSocketAddress) serverChannel.localAddress();

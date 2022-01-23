@@ -47,14 +47,14 @@ public class DefaultDispatcherRunnerFactory implements DispatcherRunnerFactory {
 			Executor ioExecutor,
 			RpcService rpcService,
 			PartialDispatcherServices partialDispatcherServices) throws Exception {
-
+		// TODO 创建DispatcherLeaderProcessFactory
 		final DispatcherLeaderProcessFactory dispatcherLeaderProcessFactory = dispatcherLeaderProcessFactoryFactory.createFactory(
 			jobGraphStoreFactory,
 			ioExecutor,
 			rpcService,
 			partialDispatcherServices,
 			fatalErrorHandler);
-
+		// TODO 创建DispatcherRunner
 		return DefaultDispatcherRunner.create(
 			leaderElectionService,
 			fatalErrorHandler,

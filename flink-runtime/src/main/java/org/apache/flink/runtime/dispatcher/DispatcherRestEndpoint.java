@@ -80,19 +80,20 @@ public class DispatcherRestEndpoint extends WebMonitorEndpoint<DispatcherGateway
 
 	@Override
 	protected List<Tuple2<RestHandlerSpecification, ChannelInboundHandler>> initializeHandlers(final CompletableFuture<String> localAddressFuture) {
+		// TODO 调用WebMointorEndpoint.initializeHandlers()方法。
 		List<Tuple2<RestHandlerSpecification, ChannelInboundHandler>> handlers = super.initializeHandlers(localAddressFuture);
 
 		// Add the Dispatcher specific handlers
 
 		final Time timeout = restConfiguration.getTimeout();
-
+		// TODO 创建JobSubmitHandler用于任务提交
 		JobSubmitHandler jobSubmitHandler = new JobSubmitHandler(
 			leaderRetriever,
 			timeout,
 			responseHeaders,
 			executor,
 			clusterConfiguration);
-
+		// TODO 如果允许通过web提交JobGraph，就会通过WebSubmissionExtension加载Web提交任务相关的Handler。
 		if (restConfiguration.isWebSubmitEnabled()) {
 			try {
 				webSubmissionExtension = WebMonitorUtils.loadWebSubmissionExtension(
@@ -105,6 +106,7 @@ public class DispatcherRestEndpoint extends WebMonitorEndpoint<DispatcherGateway
 					clusterConfiguration);
 
 				// register extension handlers
+				// TODO 将通过webSubmissionExtension加载的Handler添加到Handlers中
 				handlers.addAll(webSubmissionExtension.getHandlers());
 			} catch (FlinkException e) {
 				if (log.isDebugEnabled()) {
@@ -117,7 +119,7 @@ public class DispatcherRestEndpoint extends WebMonitorEndpoint<DispatcherGateway
 		} else {
 			log.info("Web-based job submission is not enabled.");
 		}
-
+		// TODO 将jobSubmitHandler添加到handlers中
 		handlers.add(Tuple2.of(jobSubmitHandler.getMessageHeaders(), jobSubmitHandler));
 
 		return handlers;

@@ -323,14 +323,18 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 	private void startTaskExecutorServices() throws Exception {
 		try {
 			// start by connecting to the ResourceManager
+			// TODO 创建ResourceManager之间的连接，此时会将TaskManager的资源信息汇报到ResourceManager
 			resourceManagerLeaderRetriever.start(new ResourceManagerLeaderListener());
 
 			// tell the task slot table who's responsible for the task slot actions
+			// TODO 启动TaskSlotTable，用于管理当前TaskManager中的Slot计算资源
 			taskSlotTable.start(new SlotActionsImpl(), getMainThreadExecutor());
 
 			// start the job leader service
+			// TODO 启动jobLeaderService服务，用于和JobManager进行RPC通信，监听和获取JobManager当前活跃的Leader节点。
 			jobLeaderService.start(getAddress(), getRpcService(), haServices, new JobLeaderListenerImpl());
-
+			// TODO 创建FileCache对象，用于存储Task在执行过程中从PermanentBlobService拉取的文件，并将文件展开在
+			// TODO /tmp_/ 路径中，如果Task处于非注册状态超过5秒，将清理临时文件。
 			fileCache = new FileCache(taskManagerConfiguration.getTmpDirectories(), blobCacheService.getPermanentBlobService());
 		} catch (Exception e) {
 			handleStartTaskExecutorServicesException(e);
@@ -958,7 +962,9 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 	// ------------------------------------------------------------------------
 
 	private void notifyOfNewResourceManagerLeader(String newLeaderAddress, ResourceManagerId newResourceManagerId) {
+		// 创建新的ResourceMananger地址
 		resourceManagerAddress = createResourceManagerAddress(newLeaderAddress, newResourceManagerId);
+		// 重新连接ResourceMananger
 		reconnectToResourceManager(new FlinkException(String.format("ResourceManager leader changed to new address %s", resourceManagerAddress)));
 	}
 
@@ -973,8 +979,11 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 	}
 
 	private void reconnectToResourceManager(Exception cause) {
+		// 关闭之前的ResourceManager连接
 		closeResourceManagerConnection(cause);
+		// 开始注册超时等待时间
 		startRegistrationTimeout();
+		// 尝试再次连接ResourceManager
 		tryConnectToResourceManager();
 	}
 
@@ -990,7 +999,7 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 		assert(resourceManagerConnection == null);
 
 		log.info("Connecting to ResourceManager {}.", resourceManagerAddress);
-
+		// 创建TaskExecutorRegistration 用于存放TaskExecutor的基础信息，包括TaskExecutorAddress,resourceId,dataPort,hardwareDescription等
 		final TaskExecutorRegistration taskExecutorRegistration = new TaskExecutorRegistration(
 			getAddress(),
 			getResourceID(),
@@ -999,7 +1008,7 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 			taskManagerConfiguration.getDefaultSlotResourceProfile(),
 			taskManagerConfiguration.getTotalResourceProfile()
 		);
-
+		// 创建TaskExecutorToResourceManagerConnection，即TaskExecutor和ResourceManager之间的物理连接。
 		resourceManagerConnection =
 			new TaskExecutorToResourceManagerConnection(
 				log,
@@ -1010,6 +1019,7 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 				getMainThreadExecutor(),
 				new ResourceManagerRegistrationListener(),
 				taskExecutorRegistration);
+		// 启动TaskExecutorToResourceManagerConnection
 		resourceManagerConnection.start();
 	}
 
@@ -1018,13 +1028,14 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 			ResourceID resourceManagerResourceId,
 			InstanceID taskExecutorRegistrationId,
 			ClusterInformation clusterInformation) {
-
+		// 通过resourceManagerGateway向ResourceManager上报slotReport信息。slotReport中包含当前TaskExecutor具备的
+		// Slot资源报告，如Slot数量和单位Slot的配置等。
 		final CompletableFuture<Acknowledge> slotReportResponseFuture = resourceManagerGateway.sendSlotReport(
 			getResourceID(),
 			taskExecutorRegistrationId,
 			taskSlotTable.createSlotReport(getResourceID()),
 			taskManagerConfiguration.getTimeout());
-
+		// 如果SlotReport上报异常，则重新建立与ResourceManager之间的连接
 		slotReportResponseFuture.whenCompleteAsync(
 			(acknowledge, throwable) -> {
 				if (throwable != null) {
@@ -1033,6 +1044,8 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 			}, getMainThreadExecutor());
 
 		// monitor the resource manager as heartbeat target
+		// 通过resourceManagerHeartbeatManager创建TaskExecutor与ResourceManager之间的心跳连接。
+		// TaskExecutor可以实现Blob对象文件的获取与上传。
 		resourceManagerHeartbeatManager.monitorTarget(resourceManagerResourceId, new HeartbeatTarget<TaskExecutorHeartbeatPayload>() {
 			@Override
 			public void receiveHeartbeat(ResourceID resourceID, TaskExecutorHeartbeatPayload heartbeatPayload) {
@@ -1051,12 +1064,12 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 			clusterInformation.getBlobServerPort());
 
 		blobCacheService.setBlobServerAddress(blobServerAddress);
-
+		// 创建EstablishedResourceManagerConnection对象，保存与ResourceManager之间创建的连接信息，并一直存储在TaskExecutor中。
 		establishedResourceManagerConnection = new EstablishedResourceManagerConnection(
 			resourceManagerGateway,
 			resourceManagerResourceId,
 			taskExecutorRegistrationId);
-
+		// 停止注册超时监听器，此时会停止在TaskExecutor注册前启动的监听定时器，不再做TaskExecutor注册超时检测。
 		stopRegistrationTimeout();
 	}
 
@@ -1658,6 +1671,7 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 		@Override
 		public void notifyLeaderAddress(final String leaderAddress, final UUID leaderSessionID) {
 			runAsync(
+				// 根据新的leaderAddress建立与ResourceManager之间的连接
 				() -> notifyOfNewResourceManagerLeader(
 					leaderAddress,
 					ResourceManagerId.fromUuidOrNull(leaderSessionID)));
@@ -1665,6 +1679,7 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 
 		@Override
 		public void handleError(Exception exception) {
+			// 系统异常处理。
 			onFatalError(exception);
 		}
 	}
@@ -1704,11 +1719,12 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 
 		@Override
 		public void onRegistrationSuccess(TaskExecutorToResourceManagerConnection connection, TaskExecutorRegistrationSuccess success) {
+			// 获取相关配置信息，包括ResourceManagerGateway
 			final ResourceID resourceManagerId = success.getResourceManagerId();
 			final InstanceID taskExecutorRegistrationId = success.getRegistrationId();
 			final ClusterInformation clusterInformation = success.getClusterInformation();
 			final ResourceManagerGateway resourceManagerGateway = connection.getTargetGateway();
-
+			// 异步执行establishResourceManagerConnection方法，构建与ResourceManager之间的网络连接
 			runAsync(
 				() -> {
 					// filter out outdated connections

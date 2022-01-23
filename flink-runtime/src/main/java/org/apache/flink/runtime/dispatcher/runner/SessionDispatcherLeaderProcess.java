@@ -71,8 +71,12 @@ public class SessionDispatcherLeaderProcess extends AbstractDispatcherLeaderProc
 
 	@Override
 	protected void onStart() {
+		// TODO 调用startService方法， 启动jobGraphStore
+		// TODO JobGraphStore主要用于存储集群中运行的JobGraph，当系统出现异常时，可以从JobGraphStore中获取JobGraph并再次提交到Dispather上运行。
 		startServices();
-
+		// TODO recoverJobsAsync()方法对JobGraphStore中的方法进行恢复。
+		// TODO createDispatcherIfRunning方法，创建Dispatcher并将恢复的JobGraph提交到Dispatcher上运行
+		// TODO onErrorIfRunning方法捕获执行过程中出现的异常处理。
 		onGoingRecoveryOperation = recoverJobsAsync()
 			.thenAccept(this::createDispatcherIfRunning)
 			.handle(this::onErrorIfRunning);
@@ -96,12 +100,12 @@ public class SessionDispatcherLeaderProcess extends AbstractDispatcherLeaderProc
 	}
 
 	private void createDispatcher(Collection<JobGraph> jobGraphs) {
-
+		// TODO 通过dispatcherGatewayServiceFactory创建DispatcherGatewayService 服务
 		final DispatcherGatewayService dispatcherService = dispatcherGatewayServiceFactory.create(
 			DispatcherId.fromUuid(getLeaderSessionId()),
 			jobGraphs,
 			jobGraphStore);
-
+		// TODO 完成Dispatcher的后续配置，如设定DispatcherService
 		completeDispatcherSetup(dispatcherService);
 	}
 

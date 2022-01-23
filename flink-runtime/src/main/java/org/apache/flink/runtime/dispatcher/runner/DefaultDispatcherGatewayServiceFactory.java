@@ -50,6 +50,19 @@ class DefaultDispatcherGatewayServiceFactory implements AbstractDispatcherLeader
 		this.partialDispatcherServices = partialDispatcherServices;
 	}
 
+	/**
+	 * 创建和启动dispatcher服务。
+	 * @param fencingToken
+	 * @param recoveredJobs
+	 * @param jobGraphWriter
+	 * @return
+	 * 1. 调用dispatcherFactory创建dispatcher组件。注意，参数包括rpcService、fencingToken以及从JobGraphStore中恢复的recovereJobs集合，
+	 *    还有通过partialDispatcherServices和jobGraphWriter创建的PartialDispatcherServicesWithJobGraphStore。其中，DispatcherServices
+	 *    包含了Dispatcher组件用到的服务，Dispatcher组件会在初始化的过程中从DispatcherServices获取这些服务，比如highAvaliabilityServices、
+	 *    heartbeatServices等。
+	 * 2. dispatcher创建完毕后，会调用dispatcher.start()方法启动dispatcher组件，这里实际上调用的事RpcEndpoint.start()方法启动Dispatcher对应RPC服务。
+	 *
+	 */
 	@Override
 	public AbstractDispatcherLeaderProcess.DispatcherGatewayService create(
 			DispatcherId fencingToken,

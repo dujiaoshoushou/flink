@@ -198,13 +198,16 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 
 	private void startResourceManagerServices() throws Exception {
 		try {
+			// TODO 从highAvailabilityServices基础服务中获取ResourceManager对应的leaderElectionService，其中leaderElectionService用于高可用集群模式下，提供
+			// TODO ResourceManager leader的能力，以保证集群ResourceManager组件的高可用。
 			leaderElectionService = highAvailabilityServices.getResourceManagerLeaderElectionService();
-
+			// TODO ResourceManager初始化方法，主要由子类实现服务启动过程中需要执行的操作。
 			initialize();
-
+			// TODO 通过leaderElectionService服务启动当前ResourceManager，并设定为Leader角色
 			leaderElectionService.start(this);
+			// TODO 启动jobLeaderIdService，用于管理注册的JobManager节点，包括对JobManager的注册和注销等操作。
 			jobLeaderIdService.start(new JobLeaderIdActionsImpl());
-
+			// TODO 注册Slot和TaskExecutor的Metrics监控信息。
 			registerSlotAndTaskExecutorMetrics();
 		} catch (Exception e) {
 			handleStartResourceManagerServicesException(e);
@@ -880,18 +883,20 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 	 */
 	@Override
 	public void grantLeadership(final UUID newLeaderSessionID) {
+		// TODO 在clearStateFuture中增加异步操作，调用tryAcceptLeadership()方法。
 		final CompletableFuture<Boolean> acceptLeadershipFuture = clearStateFuture
 			.thenComposeAsync((ignored) -> tryAcceptLeadership(newLeaderSessionID), getUnfencedMainThreadExecutor());
-
+		// TODO 如果LeaderContender接受了leaderShip，通知leaderElectionService进行confirm操作。
 		final CompletableFuture<Void> confirmationFuture = acceptLeadershipFuture.thenAcceptAsync(
 			(acceptLeadership) -> {
 				if (acceptLeadership) {
 					// confirming the leader session ID might be blocking,
+					// TODO 调用leaderElectionService.confirmLeadership进行leadership确认
 					leaderElectionService.confirmLeadership(newLeaderSessionID, getAddress());
 				}
 			},
 			getRpcService().getExecutor());
-
+		// TODO 如果在此过程中出现错误，则执行onFatalError()方法。
 		confirmationFuture.whenComplete(
 			(Void ignored, Throwable throwable) -> {
 				if (throwable != null) {
@@ -922,8 +927,9 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 	}
 
 	protected void startServicesOnLeadership() {
+		// TODO 启动心跳服务
 		startHeartbeatServices();
-
+		// TODO 启动slotManager服务。
 		slotManager.start(getFencingToken(), getMainThreadExecutor(), new ResourceActionsImpl());
 	}
 
@@ -950,13 +956,13 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 	private void startHeartbeatServices() {
 		taskManagerHeartbeatManager = heartbeatServices.createHeartbeatManagerSender(
 			resourceId,
-			new TaskManagerHeartbeatListener(),
+			new TaskManagerHeartbeatListener(), // 监听TaskManager的心跳
 			getMainThreadExecutor(),
 			log);
 
 		jobManagerHeartbeatManager = heartbeatServices.createHeartbeatManagerSender(
 			resourceId,
-			new JobManagerHeartbeatListener(),
+			new JobManagerHeartbeatListener(), // 监听JobManager的心跳。
 			getMainThreadExecutor(),
 			log);
 	}

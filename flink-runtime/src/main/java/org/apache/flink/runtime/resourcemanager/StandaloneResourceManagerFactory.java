@@ -48,6 +48,7 @@ public enum StandaloneResourceManagerFactory implements ResourceManagerFactory<R
 			ClusterInformation clusterInformation,
 			@Nullable String webInterfaceUrl,
 			ResourceManagerMetricGroup resourceManagerMetricGroup) throws Exception {
+		// TODO 创建ResourceManagerRuntimeServices
 		final ResourceManagerRuntimeServicesConfiguration resourceManagerRuntimeServicesConfiguration = ResourceManagerRuntimeServicesConfiguration.fromConfiguration(configuration);
 		final ResourceManagerRuntimeServices resourceManagerRuntimeServices = ResourceManagerRuntimeServices.fromConfiguration(
 			resourceManagerRuntimeServicesConfiguration,
@@ -55,7 +56,7 @@ public enum StandaloneResourceManagerFactory implements ResourceManagerFactory<R
 			rpcService.getScheduledExecutor());
 
 		final Time standaloneClusterStartupPeriodTime = ConfigurationUtils.getStandaloneClusterStartupPeriodTime(configuration);
-
+		// TODO 返回创建StandaloneResourceManager实例
 		return new StandaloneResourceManager(
 			rpcService,
 			getEndpointId(),

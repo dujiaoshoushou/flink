@@ -70,10 +70,12 @@ public class ResourceManagerRuntimeServices {
 		final SlotManagerConfiguration slotManagerConfiguration = configuration.getSlotManagerConfiguration();
 
 		final SlotMatchingStrategy slotMatchingStrategy;
-
+		// TODO 初始化slotMatchingStrategy
 		if (slotManagerConfiguration.evenlySpreadOutSlots()) {
+			// TODO 按照利用率最低匹配原则匹配Slot资源，尽可能保证TaskExecutor上资源的使用率处于比较低的水平，这种策略能够有效降低机器的负载。
 			slotMatchingStrategy = LeastUtilizationSlotMatchingStrategy.INSTANCE;
 		} else {
+			// TODO 直接返回第一个匹配的Slot资源策略。
 			slotMatchingStrategy = AnyMatchingSlotMatchingStrategy.INSTANCE;
 		}
 
