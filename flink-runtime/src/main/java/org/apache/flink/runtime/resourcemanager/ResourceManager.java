@@ -97,51 +97,85 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 
 	public static final String RESOURCE_MANAGER_NAME = "resourcemanager";
 
-	/** Unique id of the resource manager. */
+	/** Unique id of the resource manager.
+	 * ResourceManager对应的唯一资源ID
+	 * */
 	private final ResourceID resourceId;
 
-	/** All currently registered JobMasterGateways scoped by JobID. */
+	/** All currently registered JobMasterGateways scoped by JobID.
+	 * 专门存储JobManager注册信息。其中Key为JobID；Value为JobManagerRegistration，
+	 * 当启动JobManager服务时，就会将JobManager信息注册在jobManagerRegistrations
+	 * */
 	private final Map<JobID, JobManagerRegistration> jobManagerRegistrations;
 
-	/** All currently registered JobMasterGateways scoped by ResourceID. */
+	/** All currently registered JobMasterGateways scoped by ResourceID.
+	 * 用于存储JobManager注册信息，与jobManagerRegistrations区别在于Key为ResourceID。
+	 * */
 	private final Map<ResourceID, JobManagerRegistration> jmResourceIdRegistrations;
 
-	/** Service to retrieve the job leader ids. */
+	/** Service to retrieve the job leader ids.
+	 * 用于获取Job Leader ID 的服务，在开启的高可用集群中，当JobManager的Leader节点发生切换时，
+	 * 会借助jobLeaderIdService获取当前作业有效的JobID和地址信息。
+	 * */
 	private final JobLeaderIdService jobLeaderIdService;
 
-	/** All currently registered TaskExecutors with there framework specific worker information. */
+	/** All currently registered TaskExecutors with there framework specific worker information.
+	 * 注册在ResourceManager的TaskExecutor列表中，其中Key为TaskExecutor对应的ResourceID，value为WorkerRegistration，
+	 * 即TaskExecutor向ResourceManager注册过程中所提供的信息。
+	 * */
 	private final Map<ResourceID, WorkerRegistration<WorkerType>> taskExecutors;
 
-	/** Ongoing registration of TaskExecutors per resource ID. */
+	/** Ongoing registration of TaskExecutors per resource ID.
+	 * 专门存储TaskExecutorGateway的CompletableFuture对象，key为TaskExecutor对应的ResourceID，
+	 * Value为CompletableFuture，用于获取TaskExecutorGateway，实现与TaskExecutor之间的RPC通信。
+	 * */
 	private final Map<ResourceID, CompletableFuture<TaskExecutorGateway>> taskExecutorGatewayFutures;
 
-	/** High availability services for leader retrieval and election. */
+	/** High availability services for leader retrieval and election.
+	 * 系统高可用服务，基于highAvailabilityServices服务支持组件高可用。
+	 * */
 	private final HighAvailabilityServices highAvailabilityServices;
-
+	/**
+	 * 用于创建HearbeatManager服务，和其他组件之间直接心跳连接。
+	 */
 	private final HeartbeatServices heartbeatServices;
 
-	/** Fatal error handler. */
+	/** Fatal error handler.
+	 * 系统异常错误处理，当ResourceManager出现异常时调用fatalErrorHandler处理异常错误。
+	 * */
 	private final FatalErrorHandler fatalErrorHandler;
 
-	/** The slot manager maintains the available slots. */
+	/** The slot manager maintains the available slots.
+	 * ResourceManager内部组件，用于管理集群的可以Slot资源，同时接收并处理TaskExecutor的SlotReport
+	 * */
 	private final SlotManager slotManager;
-
+	/**
+	 * 存储整个Flink集群共享的信息，包括blobServerHostname和blobServerPort等配置。
+	 */
 	private final ClusterInformation clusterInformation;
-
+	/**
+	 * ResourceManager的MetricGroup，用于收集和ResourceManager相关的监控指标。
+	 */
 	private final ResourceManagerMetricGroup resourceManagerMetricGroup;
 
-	/** The service to elect a ResourceManager leader. */
+	/** The service to elect a ResourceManager leader.
+	 * 基于ZooKeeper实现的Leader选举服务，在这里用于实现ResourceManager组件高可用。
+	 * */
 	private LeaderElectionService leaderElectionService;
 
-	/** The heartbeat manager with task managers. */
+	/** The heartbeat manager with task managers.
+	 * 管理与TaskManager之间的心跳信息
+	 * */
 	private HeartbeatManager<TaskExecutorHeartbeatPayload, Void> taskManagerHeartbeatManager;
 
-	/** The heartbeat manager with job managers. */
+	/** The heartbeat manager with job managers.
+	 * 管理与JobManager之间的心跳信息。
+	 * */
 	private HeartbeatManager<Void, Void> jobManagerHeartbeatManager;
 
 	/**
 	 * Represents asynchronous state clearing work.
-	 *
+	 * 用于停止ResourceManager后进行数据异步清理。
 	 * @see #clearStateAsync()
 	 * @see #clearStateInternal()
 	 */
