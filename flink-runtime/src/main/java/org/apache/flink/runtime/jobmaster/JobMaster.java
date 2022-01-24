@@ -499,6 +499,18 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 		}
 	}
 
+	/**
+	 *
+	 * @param taskManagerId identifying the task manager
+	 * @param slots         to offer to the job manager
+	 * @param timeout       for the rpc call
+	 * @return
+	 * 1. 从registeredTaskManagers对象中获取指定taskManagerId的注册信息，包括TaskManagerLocation和TaskExecutorGateway
+	 * 2. 创建RpcTaskManagerGateway实例，同时调用getFencingToken()方法获取Token信息，用于访问TaskManager RPC接口时进行Token认证。
+	 * 3. 调用slotPool.offerSlots()方法处理TaskManager发送的SlotOffer信息，主要将SlotOffer信息存储在JobManager的本地的SlotPool组件中。
+	 *    任务在调度和执行时，会从SlotPool中获取有效的Slot资源，通过调度器向Slot所在的TaskManager提交Task实例并运行。
+	 * 4. 将注册好的SlotOffer信息返回给TaskExecutor，用于清除TaskExecutor中已经分配的Slot信息。
+	 */
 	@Override
 	public CompletableFuture<Collection<SlotOffer>> offerSlots(
 			final ResourceID taskManagerId,

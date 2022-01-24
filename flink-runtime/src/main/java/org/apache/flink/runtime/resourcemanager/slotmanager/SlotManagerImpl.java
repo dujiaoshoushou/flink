@@ -355,6 +355,14 @@ public class SlotManagerImpl implements SlotManager {
 	 *
 	 * @param taskExecutorConnection for the new task manager
 	 * @param initialSlotReport for the new task manager
+	 *
+	 * 1. 进行初始化状态检查，如检查SlotManager是否启动，确保SlotManager处于运行状态。
+	 * 2. 判断在taskManagerRegistrations中是否已经注册了TaskManager的连接信息，如果是则调用reportSlotStatus()
+	 *    方法对SlotReport中已经注册的TaskManager的Slot信息进行更新，否则将当前TaskManager视为新启动实例，并对新启动的TaskManager进行注册。
+	 * 3. 将SlotReport initialSlotReport 中的SlotStatus信息注册到reportedSlots 集合中，根据taskExecutorConnection连接taskManagerRegistration
+	 *    将taskManagerRegistration添加到taskManagerRegistrations集合中。taskExecutorConnection是在TaskExecutor启动时注册到ResourceManager中的，
+	 *    taskManagerRegistration主要用于存储reportedSlots和taskExecutorConnection信息。
+	 * 4. 调用registerSlot() 方法注册initialSlotReport中的SlotStatus信息，最终完成TaskManager的资源上报和注册。
 	 */
 	@Override
 	public void registerTaskManager(final TaskExecutorConnection taskExecutorConnection, SlotReport initialSlotReport) {
@@ -570,6 +578,16 @@ public class SlotManagerImpl implements SlotManager {
 	 * @param allocationId which is currently deployed in the slot
 	 * @param resourceProfile of the slot
 	 * @param taskManagerConnection to communicate with the remote task manager
+	 * 1. 判断Slot集合中是否含有需要注册的slotId，如果有则删除之前的Slot信息，这种情况通常发生于TaskManager进行了重启操作。
+	 * 2. 将上报的Slot转换成TaskManagerSlot。TaskManagerSlot是存储在SlotManager的一种Slot格式，包含了Slot的SlotId、
+	 *    ResourceProfile以及TaskManagerConnection等信息。
+	 * 3. 如果Slot没有被分配，即满足allocationId=null条件，则调用findExactlyMatchingPendingTaskManagerSlot()方法，
+	 *    根据resourceProfile资源信息从PendingSlots集合中匹配合适的Slot，如果匹配成功则创建TaskManagerSlot并赋值给pendingTaskManagerSlot。
+	 * 4. 判断pendingTaskManagerSlot是否为空，如果为空，则调用updateSlot()方法更新SlotManager中RegisterSlots和FreeSlots。
+	 * 5. 当pendingSlots通过ResourceProfile匹配到的Slot符合资源申请条件时，先删除pendingSlots中已经匹配到的TaskManagerSlotId，
+	 *                                 然后从pendingTaskManagerSlot中获取PendingSlotRequest信息。
+	 * 6. 判断PendingSlotRequest是否为空，如果为空则直接调用handleFreeSlot()释放Slot资源，如果不为空则调用allocateSlot()方法
+	 *                              将Slot分配给指定PendingSlotRequest。
 	 */
 	private void registerSlot(
 			SlotID slotId,
@@ -746,6 +764,13 @@ public class SlotManagerImpl implements SlotManager {
 	 *
 	 * @param pendingSlotRequest to allocate a slot for
 	 * @throws ResourceManagerException if the slot request failed or is unfulfillable
+	 * 1. 通过pendingSlotRequest获取ResourceProfile资源描述信息，用于和SlotManager中注册的Slot计算资源进行匹配。
+	 * 2. 调用findMatchingSlot()方法，根据ResourceProfile资源描述进行Slot资源匹配，主要是freeSlots集合中检索匹配。
+	 * 3. 如果ResourceProfile中的资源需要和SlotManager中的Slot资源匹配成功，则调用allocateSlot()方法分配TaskManagerSlot资源。
+	 * 4. 如果资源没有匹配上，则调用fulfillPendingSlotRequestWithPendingTaskManagerSlot()方法继续处理，其中包括从
+	 *    PendingTaskManagerSlot中寻找符合条件的资源，如果找到了，则向HashMap<TaskManagerSlotId, PendingTaskManagerSlot> pendingSlots
+	 *    集合中添加pendingTaskManagerSlot信息。当符合条件的Slot资源释放后，会立即从pendingSlots中获取pendingTaskManagerSlot并分配给PendingSlotRequest。
+	 * 5. 如果SlotRequest中的ResourceProfile资源没有匹配到合适的Slot资源，则抛出异常。
 	 */
 	private void internalRequestSlot(PendingSlotRequest pendingSlotRequest) throws ResourceManagerException {
 		final ResourceProfile resourceProfile = pendingSlotRequest.getResourceProfile();
@@ -823,6 +848,19 @@ public class SlotManagerImpl implements SlotManager {
 	 *
 	 * @param taskManagerSlot to allocate for the given slot request
 	 * @param pendingSlotRequest to allocate the given slot for
+	 * 1. 如果taskManagerSlot中的Slot资源状态为FREE，则分配给PendingRequest，否则抛出异常。
+	 * 2. 从taskManagerSlot中获取TaskExecutorConnection的连接信息，并从TaskExecutorConnection中获取TaskExecutorGateway，
+	 *    用于向TaskExecutor通知Slot计算资源的分配结果。
+	 * 3. 将当前的pendingSlotRequest分配到taskManagerSlot中，为pendingSlotRequest设定异步RequestFuture操作。
+	 * 4. 从taskManagerRegistration中获取当前TaskManager的taskManager注册信息，并将该taskManagerRegistration标记为已使用状态。
+	 * 5. 调用TaskExecutorGateway.requestSlot()方法为pendingSlotRequest对应的作业分配Slot资源。此时TaskManager会接收到来自
+	 *    ResourceManager的请求，将Slot资源提供给指定的JobManager。
+	 * 6. 执行requestFuture中的操作返回Ack确认信息，在requestFuture中调用completableFuture的异步操作。completableFuture判断Ack是否为空，
+	 *    如果TaskExecutor返回了Ack，表明TaskExecutor正常分配了资源，此时调用updateSlot()方法更新Slot为已分配状态。
+	 * 7. 如果Ack未正确返回，则判断失败原因。如果接收到Slot已经被占用的异常，则继续抛出异常，同时使用返回Slot信息更新SlotManager对应Slot的状态，
+	 *    如果是其他异常，则调用removeSlotRequestFromSlot()方法，清楚Slot的SlotRequst信息。
+	 * 8. 如果返回Cancellation类型异常，则调用handleFailedSlotRequest()方法进行处理，此时SlotManager会重新分配一个新的Slot满足SlotRequest中的资源请求，
+	 *    如果还无法满足则抛出异常。
 	 */
 	private void allocateSlot(TaskManagerSlot taskManagerSlot, PendingSlotRequest pendingSlotRequest) {
 		Preconditions.checkState(taskManagerSlot.getState() == TaskManagerSlot.State.FREE);

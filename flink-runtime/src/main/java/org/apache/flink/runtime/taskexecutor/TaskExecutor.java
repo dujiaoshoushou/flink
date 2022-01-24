@@ -813,6 +813,23 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 	// Slot allocation RPCs
 	// ----------------------------------------------------------------------
 
+	/**
+	 *
+	 * @param slotId slot id for the request
+	 * @param jobId for which to request a slot
+	 * @param allocationId id for the request
+	 * @param resourceProfile of requested slot, used only for dynamic slot allocation and will be ignored otherwise
+	 * @param targetAddress to which to offer the requested slots
+	 * @param resourceManagerId current leader id of the ResourceManager
+	 * @param timeout for the operation
+	 * @return
+	 * 1. 在TaskExecutor中首先过滤ResourceManager无效的资源申请，包括判断和ResourceManager之间的网络连接是否正常、本地taskSlotTable中
+	 *    空闲Slot数量是否满足知道SlotNumber的请求数量等，如果条件不满足则抛出异常。
+	 * 2. 如果JobManagerTable包含了指定JobId对应的注册信息，则调用offerSlotsToJobManager()方法直接向JobManager提供分配Slot计算资源。
+	 *    jobManagerTable中JobManager的注册信息是JobManager启动过程中主动向TaskManager注册生成的。
+	 * 3. 如果jobManagerTable没有注册JobId信息，则调用jobLeaderService.addJob(jobId,targetAddress)方法将该JobID对应的的作业信息
+	 *    注册到JobLeaderService中，在此期间如果出现异常，都需要释放Slot。
+	 */
 	@Override
 	public CompletableFuture<Acknowledge> requestSlot(
 		final SlotID slotId,
