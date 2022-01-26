@@ -124,19 +124,23 @@ public enum ClientUtils {
 		final ClassLoader userCodeClassLoader = program.getUserCodeClassLoader();
 		final ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
 		try {
+			// 当前线程的ContextClassLoader设定为userCodeClassLoader
 			Thread.currentThread().setContextClassLoader(userCodeClassLoader);
 
 			LOG.info("Starting program (detached: {})", !configuration.getBoolean(DeploymentOptions.ATTACHED));
-
+			// 获取ContextEnvironmentFactory
 			ContextEnvironmentFactory factory = new ContextEnvironmentFactory(
 					executorServiceLoader,
 					configuration,
 					userCodeClassLoader);
+			// 初始化ContextEnvironment
 			ContextEnvironment.setAsContext(factory);
 
 			try {
+				// 执行PackagedProgram中的应用程序
 				program.invokeInteractiveModeForExecution();
 			} finally {
+				// 销毁ExecutionEnvironmentFactory
 				ContextEnvironment.unsetContext();
 			}
 		} finally {

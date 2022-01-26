@@ -45,10 +45,12 @@ public class StreamGraphTranslator implements FlinkPipelineTranslator {
 			Pipeline pipeline,
 			Configuration optimizerConfiguration,
 			int defaultParallelism) {
+		// 判断当前pipeline是否为StreamGraph
 		checkArgument(pipeline instanceof StreamGraph,
 				"Given pipeline is not a DataStream StreamGraph.");
-
+		// 将pipeline强制类型转换为StreamGraph
 		StreamGraph streamGraph = (StreamGraph) pipeline;
+		// 调用streamGraph.getJobGraph方法获取JobGraph
 		return streamGraph.getJobGraph(null);
 	}
 

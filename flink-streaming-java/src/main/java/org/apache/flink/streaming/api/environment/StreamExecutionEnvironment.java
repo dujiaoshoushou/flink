@@ -131,6 +131,7 @@ public class StreamExecutionEnvironment {
 
 	/**
 	 * The environment of the context (local by default, cluster if invoked through command line).
+	 * 主要用于以命令行模式提交作业，当用户使用客户端提交作业时，就会通过contextEnvironmentFactory创建StreamExecutionEnvironmentFactory
 	 */
 	private static StreamExecutionEnvironmentFactory contextEnvironmentFactory = null;
 
@@ -142,32 +143,53 @@ public class StreamExecutionEnvironment {
 
 	// ------------------------------------------------------------------------
 
-	/** The execution configuration for this environment. */
+	/** The execution configuration for this environment.
+	 * 主要用于存储当前运行环境中的执行参数，例如通过执行模式（executionMode）区分当前任务是批计算还是流计算。
+	 * */
 	private final ExecutionConfig config = new ExecutionConfig();
 
-	/** Settings that control the checkpointing behavior. */
+	/** Settings that control the checkpointing behavior.
+	 * 主要用于配置Checkpoint,例如是否开启了Checkpoint，Checkpointing模式是exactly-once还是at-least-once类型等。
+	 * */
 	private final CheckpointConfig checkpointCfg = new CheckpointConfig();
-
+	/**
+	 * DataStream和DataStream之间的转换操作都会生成Transformation对象。例如当执行DataStream.shffle()操作时，
+	 * ExecutionEnvironment会创建对应的PartitionTransformation，并将该Transformation添加的StreamExecutionEnvironment
+	 * 的transformation集合中，最后通过transformation集合构建StreamGraph对象。
+	 */
 	protected final List<Transformation<?>> transformations = new ArrayList<>();
 
 	private long bufferTimeout = DEFAULT_NETWORK_BUFFER_TIMEOUT;
 
 	protected boolean isChainingEnabled = true;
 
-	/** The state backend used for storing k/v state and state snapshots. */
+	/** The state backend used for storing k/v state and state snapshots.
+	 * 该成员变量代表默认的状态存储后端，默认实现为MemoryStatBackend。
+	 * */
 	private StateBackend defaultStateBackend;
 
 	/** The time characteristic used by the data streams. */
 	private TimeCharacteristic timeCharacteristic = DEFAULT_TIME_CHARACTERISTIC;
 
 	protected final List<Tuple2<String, DistributedCache.DistributedCacheEntry>> cacheFile = new ArrayList<>();
-
+	/**
+	 * 通过Java SPI 技术加载PipelineExecutorFactory的实现类。当通过命令行提交作业时，会通过executorServiceLoader
+	 * 加载对应类型集群的PipelineExecutorFactory。
+	 */
 	private final PipelineExecutorServiceLoader executorServiceLoader;
-
+	/**
+	 * 用于执行环境中常用的K-V配置，可提供多种类型的配置获取方法。
+	 */
 	private final Configuration configuration;
-
+	/**
+	 * 专门为用户编写代码提供的类加载器，它不同于Flink框架自身的类加载器。当用户编写代码提供的类加载器，它不同于Flink框架自身的
+	 * 类加载器。当用户提交Flink应用程序的时候，userClassloader会加载、jar文件中的所有类，并伴随应用程序的产生、构建、提交、
+	 * 运行全流程。
+	 */
 	private final ClassLoader userClassloader;
-
+	/**
+	 * 用于在应用程序通过客户提交到集群后，向客户端通知应用程序的执行结果，例如作业执行状态等。
+	 */
 	private final List<JobListener> jobListeners = new ArrayList<>();
 
 	// --------------------------------------------------------------------------------------------
@@ -1719,7 +1741,7 @@ public class StreamExecutionEnvironment {
 	public JobClient executeAsync(StreamGraph streamGraph) throws Exception {
 		checkNotNull(streamGraph, "StreamGraph cannot be null.");
 		checkNotNull(configuration.get(DeploymentOptions.TARGET), "No execution.target specified in your configuration file.");
-
+		// 1.通过executorServiceLoader加载和获取PipelineExecutorFactory
 		final PipelineExecutorFactory executorFactory =
 			executorServiceLoader.getExecutorFactory(configuration);
 
@@ -1729,11 +1751,15 @@ public class StreamExecutionEnvironment {
 			configuration.get(DeploymentOptions.TARGET));
 
 		CompletableFuture<JobClient> jobClientFuture = executorFactory
+			// 2. 通过executorFactory获取PipelineExecutor
 			.getExecutor(configuration)
+			// 3. 通过PipelineExecutor执行生成JobClient同步客户端。
 			.execute(streamGraph, configuration);
 
 		try {
+			// 4. 通过jobClientFuture获取JobClient同步客户端
 			JobClient jobClient = jobClientFuture.get();
+			// 5. 将jobClient添加的jobListener集合中，用于监听任务执行状态
 			jobListeners.forEach(jobListener -> jobListener.onJobSubmitted(jobClient, null));
 			return jobClient;
 		} catch (Throwable t) {
@@ -1852,6 +1878,7 @@ public class StreamExecutionEnvironment {
 	 *
 	 * @return The execution environment of the context in which the program is
 	 * executed.
+	 *
 	 */
 	public static StreamExecutionEnvironment getExecutionEnvironment() {
 		return Utils.resolveFactory(threadLocalContextEnvironmentFactory, contextEnvironmentFactory)
@@ -1863,13 +1890,15 @@ public class StreamExecutionEnvironment {
 		// because the streaming project depends on "flink-clients" (and not the other way around)
 		// we currently need to intercept the data set environment and create a dependent stream env.
 		// this should be fixed once we rework the project dependencies
-
+		// 调用获取ExecutionEnvironment的方法，获取在flink-clients中创建的ExecutionEnvironment
 		ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 		if (env instanceof ContextEnvironment) {
+			// 如果env为ContextEnvironment，则创建StreamContextEnvironment
 			return new StreamContextEnvironment((ContextEnvironment) env);
 		} else if (env instanceof OptimizerPlanEnvironment) {
 			return new StreamPlanEnvironment(env);
 		} else {
+			// 否则创建LocalEnvironment
 			return createLocalEnvironment();
 		}
 	}

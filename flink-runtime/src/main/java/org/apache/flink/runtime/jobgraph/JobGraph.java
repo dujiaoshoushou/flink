@@ -62,44 +62,60 @@ public class JobGraph implements Serializable {
 
 	// --- job and configuration ---
 
-	/** List of task vertices included in this job graph. */
+	/** List of task vertices included in this job graph.
+	 * 存储当前Job包含的所有节点，每个节点通过JobVertex结构表示
+	 * */
 	private final Map<JobVertexID, JobVertex> taskVertices = new LinkedHashMap<JobVertexID, JobVertex>();
 
-	/** The job configuration attached to this job. */
+	/** The job configuration attached to this job.
+	 * 存储当前Job用到的配置
+	 * */
 	private final Configuration jobConfiguration = new Configuration();
 
-	/** ID of this job. May be set if specific job id is desired (e.g. session management) */
+	/** ID of this job. May be set if specific job id is desired (e.g. session management)
+	 * 当前Job对应的ID
+	 * */
 	private JobID jobID;
 
 	/** Name of this job. */
 	private final String jobName;
 
-	/** The mode in which the job is scheduled */
+	/** The mode in which the job is scheduled
+	 * 当前Job启用Task调度模式，流式作业中默认的调度模式是EAGER类型。 */
 	private ScheduleMode scheduleMode = ScheduleMode.LAZY_FROM_SOURCES;
 
 	// --- checkpointing ---
 
-	/** Job specific execution config */
+	/** Job specific execution config
+	 *  */
 	private SerializedValue<ExecutionConfig> serializedExecutionConfig;
 
-	/** The settings for the job checkpoints */
+	/** The settings for the job checkpoints
+	 * 存储当前Job使用Checkpoint配置信息 */
 	private JobCheckpointingSettings snapshotSettings;
 
-	/** Savepoint restore settings. */
+	/** Savepoint restore settings.
+	 * 存储当前Job用来恢复任务的Savepoint配置信息 */
 	private SavepointRestoreSettings savepointRestoreSettings = SavepointRestoreSettings.none();
 
 	// --- attached resources ---
 
-	/** Set of JAR files required to run this job. */
+	/** Set of JAR files required to run this job.
+	 * 存储当前Job依赖JAR包的地址。在将作业提交到集群中的过程中，
+	 * 这些JAR包会通过网络上传到运行的BlobServer中，在应用程序中的Task执行时，
+	 * 会将相关JAR包下载到TaskManager本地路径，并加载到Task线程所做的UserClassLoader中。 */
 	private final List<Path> userJars = new ArrayList<Path>();
 
-	/** Set of custom files required to run this job. */
+	/** Set of custom files required to run this job.
+	 * 当前Job需要使用的自定义文件，并通过DistributedCacheEntry表示 */
 	private final Map<String, DistributedCache.DistributedCacheEntry> userArtifacts = new HashMap<>();
 
-	/** Set of blob keys identifying the JAR files required to run this job. */
+	/** Set of blob keys identifying the JAR files required to run this job.
+	 * 将JAR包上传到BlobServer之后，返回的BlobKey地址信息会存储在该集合中。 */
 	private final List<PermanentBlobKey> userJarBlobKeys = new ArrayList<>();
 
-	/** List of classpaths required to run this job. */
+	/** List of classpaths required to run this job.
+	 * 当前作业对应的classpath信息 */
 	private List<URL> classpaths = Collections.emptyList();
 
 	// --------------------------------------------------------------------------------------------

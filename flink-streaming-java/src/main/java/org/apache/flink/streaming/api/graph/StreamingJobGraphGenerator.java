@@ -145,11 +145,30 @@ public class StreamingJobGraphGenerator {
 		jobGraph = new JobGraph(jobID, streamGraph.getJobName());
 	}
 
+	/**
+	 * 1. 调用preValidate()方法对StreamGraph进行检查，例如检查在开启Checkpoint的情况下，StreamGraph每个节点的Operator是否实现InputSelectable接口。
+	 * 2. 调用JobGraph.setScheduleMode使用StreamGraph设定JobGraph的调度模式。
+	 * 3. 对StreamGraph的StreamNode进行哈希化处理，用于生成JobVertexID。在StreamGraph中StreamNodeID为数字表示，而在JobGraph中JobVertexID由哈希码生成，
+	 *    通过哈希码区分JobGraph中的节点。
+	 * 4. 生成历史legacyHashes代码，这一步主要是为了与之前的版本兼容。
+	 * 5. 调用setChaining()方法，根据每个节点生成的哈希码从源节点开始递归创建JobVertex节点，此处会将多个符合条件的StreamNode节点链化在一个JobVertex节点中。
+	 *    执行过程中会根据JobVertex创建OperatorChain，以减少数据在TaskManager之间网络传输的性能消耗。
+	 * 6. 通过StreamEdge生成JobGraph中的JobEdge信息。
+	 * 7. 调用setSlotSharingAndCoLocation()方法设定当前JobGraph中的SlotSharing及CoLocation策略。
+	 * 8. 调用setManagedMemoryFraction()方法设定JobGraph中的管理内存比例。
+	 * 9. 调用configureCheckpointing()方法设置JobGraph中的checkpoint配置信息。
+	 * 10.根据StreamGraph设定当前JobGraph中的SavepointRestoreSettings参数。
+	 * 11.向JobGraph中添加UserArtifactEntries配置，主要有用户在Job中用到的自定义文件等。
+	 * 12.将StreamGraph中ExecutionConfig设定到JobGraph中。
+	 * 13.返回创建好的JobGraph对象。
+	 * @return
+	 */
 	private JobGraph createJobGraph() {
+		// 对StreamGraph中的节点进行检查
 		preValidate();
 
 		// make sure that all vertices start immediately
-		// 设置调度模式
+		// 设置调度模式，设定jobGraph中的ScheduleMode
 		jobGraph.setScheduleMode(streamGraph.getScheduleMode());
 
 		// Generate deterministic hashes for the nodes in order to identify them across
@@ -166,12 +185,13 @@ public class StreamingJobGraphGenerator {
 
 		Map<Integer, List<Tuple2<byte[], byte[]>>> chainedOperatorHashes = new HashMap<>();
 		// 真正对StreamGrap 进行转换，生成JobGraph图
+		// 从源节点开始递归创建JobVertex中的Task Chain
 		setChaining(hashes, legacyHashes, chainedOperatorHashes);
-
+		// 通过StreamEdge设定JobGraph的边
 		setPhysicalEdges();
-		// 设置共享slotGroup
+		// 设置共享slotGroup及CoLocation
 		setSlotSharingAndCoLocation();
-
+		// 设置内存管理比例
 		setManagedMemoryFraction(
 			Collections.unmodifiableMap(jobVertices),
 			Collections.unmodifiableMap(vertexConfigs),
@@ -180,7 +200,7 @@ public class StreamingJobGraphGenerator {
 			id -> streamGraph.getStreamNode(id).getManagedMemoryWeight());
 		// 配置checkpoint
 		configureCheckpointing();
-
+		// 设定SavepointRestoreSettings参数
 		jobGraph.setSavepointRestoreSettings(streamGraph.getSavepointRestoreSettings());
 		// 如果有之前的缓存文件配置，则重新读入
 		JobGraphGenerator.addUserArtifactEntries(streamGraph.getUserArtifacts(), jobGraph);
@@ -194,7 +214,7 @@ public class StreamingJobGraphGenerator {
 			throw new IllegalConfigurationException("Could not serialize the ExecutionConfig." +
 					"This indicates that non-serializable types (like custom serializers) were registered");
 		}
-
+		// 返回创建好的JobGraph
 		return jobGraph;
 	}
 

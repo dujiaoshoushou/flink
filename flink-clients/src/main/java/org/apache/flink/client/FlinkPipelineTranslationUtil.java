@@ -37,9 +37,9 @@ public final class FlinkPipelineTranslationUtil {
 			Pipeline pipeline,
 			Configuration optimizerConfiguration,
 			int defaultParallelism) {
-
+		// 获取FlinkPipelineTranslator
 		FlinkPipelineTranslator pipelineTranslator = getPipelineTranslator(pipeline);
-
+		// 通过pipelineTranslator.translateToJobGraph方法完成对pipeline的转换
 		return pipelineTranslator.translateToJobGraph(pipeline,
 				optimizerConfiguration,
 				defaultParallelism);
@@ -54,18 +54,21 @@ public final class FlinkPipelineTranslationUtil {
 	}
 
 	private static FlinkPipelineTranslator getPipelineTranslator(Pipeline pipeline) {
+		// 默认创建PlanTranslator
 		PlanTranslator planToJobGraphTransmogrifier = new PlanTranslator();
-
+		// 用创建的planToJobGraphTransmogrifier判断当前的pipeline是否可以转换，
+		// 本质上是判断当前pipeline是否为OptimizerPlan，如果是则直接返回。
 		if (planToJobGraphTransmogrifier.canTranslate(pipeline)) {
 			return planToJobGraphTransmogrifier;
 		}
-
+		// 通过反射的方式获取streamGraphTranslator
 		FlinkPipelineTranslator streamGraphTranslator = reflectStreamGraphTranslator();
-
+		// 如果当前pipeline不是StreamGraph，则抛出异常。
 		if (!streamGraphTranslator.canTranslate(pipeline)) {
 			throw new RuntimeException("Translator " + streamGraphTranslator + " cannot translate "
 					+ "the given pipeline " + pipeline + ".");
 		}
+		// 返回创建的streamGraphTranslator
 		return streamGraphTranslator;
 	}
 

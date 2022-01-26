@@ -83,6 +83,20 @@ public class HighAvailabilityServicesUtils {
 		}
 	}
 
+	/**
+	 *
+	 * @param configuration
+	 * @param executor
+	 * @param addressResolution
+	 * @return
+	 * @throws Exception
+	 * 1. 从configuration配置中获取HighAvailabilityMode参数，HighAvailabilityMode主要有NONE、ZOOKEEPER、FACTORY_CLASS三种类型
+	 * 2. 根据HighAvailabilityMode创建对应的类型的高可用服务。
+	 * 3. 如果HighAvailabilityMode为NONE，则创建StandaloneHaServices，这时会通过AkkaRpcServiceUtils获取集群的jobManagerRpc、resourceManagerRpc、dispatcherRpc
+	 *    的固定地址，让后通过这些参数创建StandaloneHaServices。
+	 * 4. 如果HighAvailabilityMode为ZOOKEEPER，则创建ZooKeeperHaServices实例，即基于Zookeeper实现集群的高可用服务。
+	 * 5. 如果HighAvailabilityMode为FACTORY_CLASS，则自定义高可用服务，主要通过createCustomHAServices()方法进行创建。
+	 */
 	public static HighAvailabilityServices createHighAvailabilityServices(
 		Configuration configuration,
 		Executor executor,

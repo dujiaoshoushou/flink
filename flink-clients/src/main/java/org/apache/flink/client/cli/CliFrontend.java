@@ -169,6 +169,11 @@ public class CliFrontend {
 	 * Executions the run action.
 	 *
 	 * @param args Command line arguments for the run action.
+	 * 1. 解析方法中传入的参数，然后通过解析出来的参数创建   ProgramOptions
+	 * 2. 查看是否为flink run -h 命令，如果是，则输出帮助提示。
+	 * 3. 检查是否为Python客户端提交的代码，如果不是，则要求用户必须提交.jar文件，否则抛出异常。
+	 * 4. 通过生成的ProgramOptions参数创建PackagedProgram对象。
+	 * 5. 调用executeProgram()方法执行PackagedProgram中的作业程序。
 	 */
 	protected void run(String[] args) throws Exception {
 		LOG.info("Running 'run' command.");
@@ -210,6 +215,7 @@ public class CliFrontend {
 		LOG.debug("Effective executor configuration: {}", effectiveConfiguration);
 
 		try {
+			// TODO 这里是核心，执行入口。
 			executeProgram(effectiveConfiguration, program);
 		} finally {
 			program.deleteExtractedLibraries();
@@ -947,22 +953,23 @@ public class CliFrontend {
 	public static void main(final String[] args) {
 		EnvironmentInformation.logEnvironmentInfo(LOG, "Command Line Client", args);
 
-		// 1. find the configuration directory
+		// 1. find the configuration directory 获取环境变量路径
 		final String configurationDirectory = getConfigurationDirectoryFromEnv();
 
-		// 2. load the global configuration
+		// 2. load the global configuration 加载全局配置
 		final Configuration configuration = GlobalConfiguration.loadConfiguration(configurationDirectory);
 
-		// 3. load the custom command lines
+		// 3. load the custom command lines 加载自定义命令参数
 		final List<CustomCommandLine> customCommandLines = loadCustomCommandLines(
 			configuration,
 			configurationDirectory);
 
 		try {
+			// 4. 初始化CliFrontend实例
 			final CliFrontend cli = new CliFrontend(
 				configuration,
 				customCommandLines);
-
+			// 5. 进行Kerberos认证并运行 cli.parseParameters(args)方法。
 			SecurityUtils.install(new SecurityConfiguration(cli.configuration));
 			int retCode = SecurityUtils.getInstalledContext()
 					.runSecured(() -> cli.parseParameters(args));

@@ -49,25 +49,31 @@ public class JobVertex implements java.io.Serializable {
 	// Members that define the structure / topology of the graph
 	// --------------------------------------------------------------------------------------------
 
-	/** The ID of the vertex. */
+	/** The ID of the vertex.
+	 * 存储当前JobVertex节点的ID信息 */
 	private final JobVertexID id;
 
-	/** The alternative IDs of the vertex. */
+	/** The alternative IDs of the vertex.
+	 * Vertex中的替代ID，如果JobVertexID重复了，可以使用该列表中的ID */
 	private final ArrayList<JobVertexID> idAlternatives = new ArrayList<>();
 
-	/** The IDs of all operators contained in this vertex. */
+	/** The IDs of all operators contained in this vertex.
+	 * 包含当前Vertex中所有Operator的唯一ID集合 */
 	private final ArrayList<OperatorID> operatorIDs = new ArrayList<>();
 
 	/** The alternative IDs of all operators contained in this vertex. */
 	private final ArrayList<OperatorID> operatorIdsAlternatives = new ArrayList<>();
 
-	/** List of produced data sets, one per writer. */
+	/** List of produced data sets, one per writer.
+	 * 当前Vertex对应的中间结果数据集，通过IntermediateDataSet表示 */
 	private final ArrayList<IntermediateDataSet> results = new ArrayList<>();
 
-	/** List of edges with incoming data. One per Reader. */
+	/** List of edges with incoming data. One per Reader.
+	 * 当前Vertex所有的输入边集合，通过JobEdge表示 */
 	private final ArrayList<JobEdge> inputs = new ArrayList<>();
 
-	/** Number of subtasks to split this task into at runtime. */
+	/** Number of subtasks to split this task into at runtime.
+	 * 当前Vertex节点对应的并行度参数 */
 	private int parallelism = ExecutionConfig.PARALLELISM_DEFAULT;
 
 	/** Maximum number of subtasks to split this task into a runtime. */
@@ -82,7 +88,9 @@ public class JobVertex implements java.io.Serializable {
 	/** Custom configuration passed to the assigned task at runtime. */
 	private Configuration configuration;
 
-	/** The class of the invokable. */
+	/** The class of the invokable.
+	 * 当前Vertex对应的invokableClassName，即Operator对应的ClassName，
+	 * 在Task运行过程中，会通过invokableClassName进行对应Operator的初始化与执行 */
 	private String invokableClassName;
 
 	/** Indicates of this job vertex is stoppable or not. */
@@ -94,13 +102,15 @@ public class JobVertex implements java.io.Serializable {
 	/** The name of the vertex. This will be shown in runtime logs and will be in the runtime environment. */
 	private String name;
 
-	/** Optionally, a sharing group that allows subtasks from different job vertices to run concurrently in one slot. */
+	/** Optionally, a sharing group that allows subtasks from different job vertices to run concurrently in one slot.
+	 * Vertex中Slot共享组配置，该配置运行Job节点中的SubTask运行在同一个Slot中。 */
 	private SlotSharingGroup slotSharingGroup;
 
 	/** The group inside which the vertex subtasks share slots. */
 	private CoLocationGroup coLocationGroup;
 
-	/** Optional, the name of the operator, such as 'Flat Map' or 'Join', to be included in the JSON plan. */
+	/** Optional, the name of the operator, such as 'Flat Map' or 'Join', to be included in the JSON plan.
+	 * 当前Vertex节点Operator的名称 */
 	private String operatorName;
 
 	/** Optional, the description of the operator, like 'Hash Join', or 'Sorted Group Reduce',
@@ -114,7 +124,10 @@ public class JobVertex implements java.io.Serializable {
 	 * to be included in the JSON plan. */
 	private String resultOptimizerProperties;
 
-	/** The input dependency constraint to schedule this vertex. */
+	/** The input dependency constraint to schedule this vertex.
+	 * 表示当前Vertex节点中Task被调到的输入依赖约束，其中ANY表示一旦有输入节点可以消费，
+	 * 就立即对当前JobVertex的Task进行调度执行；ALL表示只有当所有的输入节点全部可以消费时，
+	 * 才能调度当前节点对应的Task任务。 */
 	private InputDependencyConstraint inputDependencyConstraint = InputDependencyConstraint.ANY;
 
 	// --------------------------------------------------------------------------------------------

@@ -199,6 +199,7 @@ public class StreamGraphGenerator {
 	 * @return
 	 */
 	public StreamGraph generate() {
+		// 创建StreamGraph
 		streamGraph = new StreamGraph(executionConfig, checkpointConfig, savepointRestoreSettings);
 		streamGraph.setStateBackend(stateBackend);
 		streamGraph.setChaining(chaining);
@@ -209,18 +210,18 @@ public class StreamGraphGenerator {
 		streamGraph.setBlockingConnectionsBetweenChains(blockingConnectionsBetweenChains);
 
 		alreadyTransformed = new HashMap<>();
-
+		// 遍历Transformation集合，分别对集合中的Transformation进行转换
 		for (Transformation<?> transformation: transformations) {
 			// 实际执行StramGraph的生成
 			transform(transformation);
 		}
-
+		// 获取最终转换得到的StreamGraph
 		final StreamGraph builtStreamGraph = streamGraph;
-
+		// 清理转换过程中的数据
 		alreadyTransformed.clear();
 		alreadyTransformed = null;
 		streamGraph = null;
-
+		// 返回构建好的StreamGraph对象
 		return builtStreamGraph;
 	}
 
@@ -231,17 +232,18 @@ public class StreamGraphGenerator {
 	 * delegates to one of the transformation specific methods.
 	 */
 	private Collection<Integer> transform(Transformation<?> transform) {
-
+		// 判断是否为已经转换过的Transformation节点
 		if (alreadyTransformed.containsKey(transform)) {
 			return alreadyTransformed.get(transform);
 		}
-
+		// 开始转换Transformation节点
 		LOG.debug("Transforming " + transform);
 
 		if (transform.getMaxParallelism() <= 0) {
 
 			// if the max parallelism hasn't been set, then first use the job wide max parallelism
 			// from the ExecutionConfig.
+			// 如果当前transform中没有设定MaxParallelism，则获取整Job的MaxParallelism参数。
 			int globalMaxParallelismFromConfig = executionConfig.getMaxParallelism();
 			if (globalMaxParallelismFromConfig > 0) {
 				transform.setMaxParallelism(globalMaxParallelismFromConfig);
@@ -249,8 +251,10 @@ public class StreamGraphGenerator {
 		}
 
 		// call at least once to trigger exceptions about MissingTypeInfo
+		// 获取当前Transformation的输出类型
 		transform.getOutputType();
 		// 遍历transformations集合，并对其每一个Tranformation调用transform()方法
+		// 根据不同的Transformation类型，执行不同的转换方法
 		Collection<Integer> transformedIds;
 		if (transform instanceof OneInputTransformation<?, ?>) {
 			transformedIds = transformOneInputTransform((OneInputTransformation<?, ?>) transform);
@@ -309,7 +313,7 @@ public class StreamGraphGenerator {
 		if (transform.getMinResources() != null && transform.getPreferredResources() != null) {
 			streamGraph.setResources(transform.getId(), transform.getMinResources(), transform.getPreferredResources());
 		}
-
+		// 设定ManagedMemoryWeight参数
 		streamGraph.setManagedMemoryWeight(transform.getId(), transform.getManagedMemoryWeight());
 
 		return transformedIds;
@@ -339,17 +343,19 @@ public class StreamGraphGenerator {
 	 * property. @see StreamGraphGenerator
 	 */
 	private <T> Collection<Integer> transformPartition(PartitionTransformation<T> partition) {
+		// 获取上游输入的Transformation
 		Transformation<T> input = partition.getInput();
 		List<Integer> resultIds = new ArrayList<>();
-
+		// 对上游输入的Transformation进行转换，得到transformedIds集合
 		Collection<Integer> transformedIds = transform(input);
 		for (Integer transformedId: transformedIds) {
 			int virtualId = Transformation.getNewNodeId();
+			// 在StreamGraph中添加虚拟节点，此处不会产生物理操作，仅表示数据流转方向
 			streamGraph.addVirtualPartitionNode(
 					transformedId, virtualId, partition.getPartitioner(), partition.getShuffleMode());
 			resultIds.add(virtualId);
 		}
-
+		// 返回生产的virtualId集合
 		return resultIds;
 	}
 
@@ -644,18 +650,25 @@ public class StreamGraphGenerator {
 	 *
 	 * <p>This recursively transforms the inputs, creates a new {@code StreamNode} in the graph and
 	 * wired the inputs to this new node.
+	 * 1. 递归解析当前Transformation操作对应的上游转换操作，并将解析后端Transformation ID信息存储在inputIds集合中。
+	 * 2. 调用StreamGraph.addOperator()方法将Transformation中的OperatorFactory添加到StreamGraph中。
+	 * 3. 调用StreamGraph.setOneInputStatKey()方法设定KeySelector参数信息。
+	 * 4. 获得Transformation中的并行度参数，并将其设置到StreamGraph中。
+	 * 5. 调用streamGraph.addEdge方法，将上游转换操作的inputId和当前转换操作的transformId相连，构建成StreamGraph对应的边。
+	 * 6. 返回当前Transformation的ID。
 	 */
 	private <IN, OUT> Collection<Integer> transformOneInputTransform(OneInputTransformation<IN, OUT> transform) {
-
+		// 获取上游输入算子并转换，得到inputIds
 		Collection<Integer> inputIds = transform(transform.getInput());
 
 		// the recursive call might have already transformed this
 		if (alreadyTransformed.containsKey(transform)) {
 			return alreadyTransformed.get(transform);
 		}
-
+		// 获取slotSharingGroup
 		String slotSharingGroup = determineSlotSharingGroup(transform.getSlotSharingGroup(), inputIds);
 		// 通过addOperator()方法，构造StreamNode
+		// 将Transformation中的Operator添加至StreamGraph，注意直接添加的是OperatorFactory
 		streamGraph.addOperator(transform.getId(),
 				slotSharingGroup,
 				transform.getCoLocationGroupKey(),
@@ -663,12 +676,12 @@ public class StreamGraphGenerator {
 				transform.getInputType(),
 				transform.getOutputType(),
 				transform.getName());
-
+		// 设定KeySeletor
 		if (transform.getStateKeySelector() != null) {
 			TypeSerializer<?> keySerializer = transform.getStateKeyType().createSerializer(executionConfig);
 			streamGraph.setOneInputStateKey(transform.getId(), transform.getStateKeySelector(), keySerializer);
 		}
-
+		// 获得transform并行度参数将其设置到StreamGraph中
 		int parallelism = transform.getParallelism() != ExecutionConfig.PARALLELISM_DEFAULT ?
 			transform.getParallelism() : executionConfig.getParallelism();
 		streamGraph.setParallelism(transform.getId(), parallelism);
@@ -676,9 +689,10 @@ public class StreamGraphGenerator {
 
 		for (Integer inputId: inputIds) {
 			// 通过addEdge方法构造StreamEdge
+			// 调用streamGraph.addEdge方法，inputId和当前的transformId连接
 			streamGraph.addEdge(inputId, transform.getId(), 0);
 		}
-
+		// 返回当前的transformId
 		return Collections.singleton(transform.getId());
 	}
 

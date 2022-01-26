@@ -43,15 +43,17 @@ public class ExecutorUtils {
 	 * @return the corresponding {@link JobGraph}.
 	 */
 	public static JobGraph getJobGraph(@Nonnull final Pipeline pipeline, @Nonnull final Configuration configuration) {
+		// 对pipeline和configuration做非空检查
 		checkNotNull(pipeline);
 		checkNotNull(configuration);
-
+        // 调用FlinkPipelineTranslationUtil.getJobGraph()方法通过pipeline获取JobGraph对象。
 		final ExecutionConfigAccessor executionConfigAccessor = ExecutionConfigAccessor.fromConfiguration(configuration);
 		final JobGraph jobGraph = FlinkPipelineTranslationUtil
 				.getJobGraph(pipeline, configuration, executionConfigAccessor.getParallelism());
-
+		// 生成JobGraph后，向JobGraph添加JAR包依赖和Classpath等配置信息。
 		jobGraph.addJars(executionConfigAccessor.getJars());
 		jobGraph.setClasspaths(executionConfigAccessor.getClasspaths());
+		// 设定jobGraph的SavepointRestoreSettings配置
 		jobGraph.setSavepointRestoreSettings(executionConfigAccessor.getSavepointRestoreSettings());
 
 		return jobGraph;
