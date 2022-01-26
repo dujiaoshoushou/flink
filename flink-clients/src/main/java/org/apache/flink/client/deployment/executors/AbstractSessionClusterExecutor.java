@@ -52,18 +52,27 @@ public class AbstractSessionClusterExecutor<ClusterID, ClientFactory extends Clu
 		this.clusterClientFactory = checkNotNull(clusterClientFactory);
 	}
 
+	/**
+	 * 1. 调用ExecutorUtils.getJobGraph方法获取JobGraph。
+	 * 2. 通过clusterClientFactory获取ClusterDescriptor，ClusterDescriptor是对不同类型的集群描述，主要用于创建Session集群和获取集群通信的ClusterClient
+	 * 3. 调用clusterDescriptor.retrieve(clusterID)，根据指定的ClusterID获取ClusterClientProvider实例。
+	 * 4. 通过clusterClientProvider.getClusterClient()方法获取与集群运行时进行网络通信的ClusterClient实例。
+	 * 5. 使用clusterClient.submitJob(jobGraph)方法将JobGraph提交到指定的集群的运行时中，然后返回CompletableFuture<JobID>对象。
+	 */
 	@Override
 	public CompletableFuture<JobClient> execute(@Nonnull final Pipeline pipeline, @Nonnull final Configuration configuration) throws Exception {
+		// 调用ExecutorUtils.getJobGraph方法获取JobGraph
 		final JobGraph jobGraph = ExecutorUtils.getJobGraph(pipeline, configuration);
-
+		// 通过clusterClientFactory获取ClusterDescriptor
 		try (final ClusterDescriptor<ClusterID> clusterDescriptor = clusterClientFactory.createClusterDescriptor(configuration)) {
 			final ClusterID clusterID = clusterClientFactory.getClusterId(configuration);
 			checkState(clusterID != null);
-
+			// 通过clusterID获取clusterClientProvider
 			final ClusterClientProvider<ClusterID> clusterClientProvider = clusterDescriptor.retrieve(clusterID);
+			// 通过clusterClientProvider获取clusterClient
 			ClusterClient<ClusterID> clusterClient = clusterClientProvider.getClusterClient();
 			return clusterClient
-					.submitJob(jobGraph)
+					.submitJob(jobGraph) // 提交JobGraph并返回
 					.thenApplyAsync(jobID -> (JobClient) new ClusterClientJobClientAdapter<>(
 							clusterClientProvider,
 							jobID))

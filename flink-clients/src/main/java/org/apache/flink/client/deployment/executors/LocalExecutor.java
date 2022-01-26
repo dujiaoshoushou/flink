@@ -51,20 +51,32 @@ public class LocalExecutor implements PipelineExecutor {
 
 	public static final String NAME = "local";
 
+	/**
+	 * 1. 检查pipeline和configuration是否非空
+	 * 2. 调用getJobGraph()方法获取JobGraph，实际上就是调用FlinkPipelineTranslationUtil.getJobGraph()方法获取JobGraph
+	 * 3. 创建并启动本地MiniCluster，即构建伪分布式集群环境。
+	 * 4. 通过MiniCluster和configuration创建MiniClusterClient
+	 * 5. 通过clusterClient.submitJob(jobGraph)将JobGraph提交到本地MiniCluster上运行。
+	 * 6. 返返回CompletableFuture异步客户端。
+	 */
 	@Override
 	public CompletableFuture<JobClient> execute(Pipeline pipeline, Configuration configuration) throws Exception {
+		// 检查pipeline和configuration是否非空
 		checkNotNull(pipeline);
 		checkNotNull(configuration);
 
 		// we only support attached execution with the local executor.
+		// 目前仅在 local executor中支持attached execution
 		checkState(configuration.getBoolean(DeploymentOptions.ATTACHED));
-
+		// 调用getJobGraph()方法获取JobGraph，实际上就是调用FlinkPipelineTranslationUtil.getJobGraph()方法。
 		final JobGraph jobGraph = getJobGraph(pipeline, configuration);
+		// 创建并启动本地Mincluster
 		final MiniCluster miniCluster = startMiniCluster(jobGraph, configuration);
+		// 创建MiniClusterClient
 		final MiniClusterClient clusterClient = new MiniClusterClient(configuration, miniCluster);
-
+		// 通过clusterClient.submitJob(jobGraph)将JobGraph提交到MiniCluster中运行
 		CompletableFuture<JobID> jobIdFuture = clusterClient.submitJob(jobGraph);
-
+		// 返回CompletableFuture<JobClient>
 		jobIdFuture
 				.thenCompose(clusterClient::requestJobResult)
 				.thenAccept((jobResult) -> clusterClient.shutDownCluster());

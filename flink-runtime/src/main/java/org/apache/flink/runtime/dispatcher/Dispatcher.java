@@ -262,19 +262,30 @@ public abstract class Dispatcher extends PermanentlyFencedRpcEndpoint<Dispatcher
 	// RPCs
 	//------------------------------------------------------
 
+	/**
+	 *
+	 * @param jobGraph JobGraph to submit
+	 * @param timeout RPC timeout
+	 * @return
+	 * 1. 判断提交的JobGraph中JobID是否重复，如果重复则抛出DuplicateJobSubmissionException
+	 * 2. 判断JobGraph中是否仅为部分节点配置了资源。JobGraph的节点不支持部分支援配置，因此要么全部节点都配置资源，要么全不配做，否则抛出异常。
+	 * 3. 将接收的JobGraph提交到internalSubmitJob(jobGraph)方法中，执行后续流程，其中包括创建JobManagerRunner，通过JobManagerRunner创建和
+	 *   启动JobManager的底层实现实例JobMaster，并基于JobMaster管理整个Job的生命周期及Task作业的执行。
+	 */
 	@Override
 	public CompletableFuture<Acknowledge> submitJob(JobGraph jobGraph, Time timeout) {
 		log.info("Received JobGraph submission {} ({}).", jobGraph.getJobID(), jobGraph.getName());
 
 		try {
-			if (isDuplicateJob(jobGraph.getJobID())) {
+			if (isDuplicateJob(jobGraph.getJobID())) { // 判断JobID是否重复，如果重复则抛出DuplicateJobSubmissionException
 				return FutureUtils.completedExceptionally(
 					new DuplicateJobSubmissionException(jobGraph.getJobID()));
-			} else if (isPartialResourceConfigured(jobGraph)) {
+			} else if (isPartialResourceConfigured(jobGraph)) { // JobGraph中不支持部分资源配置，因此要么全部节点都配置资源，要么全部不要
 				return FutureUtils.completedExceptionally(
 					new JobSubmissionException(jobGraph.getJobID(), "Currently jobs is not supported if parts of the vertices have " +
 							"resources configured. The limitation will be removed in future versions."));
 			} else {
+				// 调用内部internalSubmitJob方法
 				return internalSubmitJob(jobGraph);
 			}
 		} catch (FlinkException e) {
@@ -320,31 +331,48 @@ public abstract class Dispatcher extends PermanentlyFencedRpcEndpoint<Dispatcher
 		return false;
 	}
 
+	/**
+	 * 1. 调用waitForTerminatingJobManager()方法异步提交JobGraph，在该方法中会创建和获取jobManagerTerminationFuture对象。
+	 *    其中jobManagerTerminationFuture主要是从jobManagerRunnerFutures集合中通过JobId获取而来的。
+	 * 2. 将this::persistAndRunJob代码块添加到jobManagerTerminationFuture异步对象中，在没有异常的情况下调用persistAndRunJob()方法，对JobGraph进行持久化并执行。
+	 * 3. 在CompletableFuture persistAndRunFuture中增加异步处理操作，判断是否出现运行异常并确定后续逻辑。此时如果 throwable不为空null，
+	 *    则直接抛出DispatcherExecption，表示Job提交失败并对错误进行解析，将错误原因抛给客户端；否则返回acknowledge确认信息，表明JobGraph提交成功并执行。
+	 * 4. 将CompletableFuture返回给调用方，客户端会通过CompletableFuture.get()方法获取执行结果中的Acknowledge，以获取Job的执行结果。
+	 */
 	private CompletableFuture<Acknowledge> internalSubmitJob(JobGraph jobGraph) {
 		log.info("Submitting job {} ({}).", jobGraph.getJobID(), jobGraph.getName());
-
+		// 异步提交JobGraph，其中包括对JobGraph的持久化和执行
 		final CompletableFuture<Acknowledge> persistAndRunFuture = waitForTerminatingJobManager(jobGraph.getJobID(), jobGraph, this::persistAndRunJob)
 			.thenApply(ignored -> Acknowledge.get());
 
 		return persistAndRunFuture.handleAsync((acknowledge, throwable) -> {
+			// 如果出现异常，对Job进行清理
 			if (throwable != null) {
 				cleanUpJobData(jobGraph.getJobID(), true);
-
+				// 对错误进行解析，将错误原因抛给客户端
 				final Throwable strippedThrowable = ExceptionUtils.stripCompletionException(throwable);
 				log.error("Failed to submit job {}.", jobGraph.getJobID(), strippedThrowable);
 				throw new CompletionException(
 					new JobSubmissionException(jobGraph.getJobID(), "Failed to submit job.", strippedThrowable));
 			} else {
+				// 提交成功则返回acknowledge
 				return acknowledge;
 			}
 		}, getRpcService().getExecutor());
 	}
 
+	/**
+	 * 1. 调用jobGraphWriter.putJobGraph()方法对JobGraph进行持久化，如果基于Zookeeper实现了集群高可用，则将JobGraph记录到ZookeeperJobGraphStore中，
+	 *    异常情况下回通过ZooKeeperJobGraphStore恢复作业。
+	 * 2. 调用runJob(jobGraph)方法执行JobGraph，然后返回CompletableFuture<Void> runJobFuture 对象。
+	 * 3. 在runJobFuture中增加作业执行完成后的操作：判断throwable是否为空，如果不为空则证明JobGraph执行异常，从JobGraphStore中移除持久化的jobGraph。
+	 */
 	private CompletableFuture<Void> persistAndRunJob(JobGraph jobGraph) throws Exception {
+		// 通过jobGraphWriter对JobGraph进行持久化
 		jobGraphWriter.putJobGraph(jobGraph);
-
+        // 执行jobGraph对应的Job并返回runJobFuture
 		final CompletableFuture<Void> runJobFuture = runJob(jobGraph);
-
+		// 增加runJobFuture执行完毕后的操作并进行异常处理
 		return runJobFuture.whenComplete(BiConsumerWithException.unchecked((Object ignored, Throwable throwable) -> {
 			if (throwable != null) {
 				jobGraphWriter.removeJobGraph(jobGraph.getJobID());
