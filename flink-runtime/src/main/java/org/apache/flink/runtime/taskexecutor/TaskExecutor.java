@@ -460,6 +460,13 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 	// Task lifecycle RPCs
 	// ----------------------------------------------------------------------
 
+	/**
+	 * 重点方法，执行Job 任务。
+	 * @param tdd describing the task to submit
+	 * @param jobMasterId identifying the submitting JobMaster
+	 * @param timeout of the submit operation
+	 * @return
+	 */
 	@Override
 	public CompletableFuture<Acknowledge> submitTask(
 			TaskDeploymentDescriptor tdd,
@@ -603,10 +610,11 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 			} catch (SlotNotFoundException | SlotNotActiveException e) {
 				throw new TaskSubmissionException("Could not submit task.", e);
 			}
-
+			// 如果添加成功，则执行Task线程
 			if (taskAdded) {
+				// 启动Task线程
 				task.startTaskThread();
-
+				// 设定ResultPartition
 				setupResultPartitionBookkeeping(
 					tdd.getJobId(),
 					tdd.getProducedPartitions(),

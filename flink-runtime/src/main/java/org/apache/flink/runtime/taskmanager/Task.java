@@ -586,17 +586,19 @@ public class Task implements Runnable, TaskSlotPayload, TaskActions, PartitionPr
 
 			// activate safety net for task thread
 			LOG.info("Creating FileSystem stream leak safety net for task {}", this);
+			// 激活当前Task线程的安全王
 			FileSystemSafetyNet.initializeSafetyNetForThread();
-
+			// 在blobService中注册当前的JobId
 			blobService.getPermanentBlobService().registerJob(jobId);
 
 			// first of all, get a user-code classloader
 			// this may involve downloading the job's JAR files and/or classes
 			LOG.info("Loading JAR files for task {}.", this);
-
+			// 为当前Task加载依赖JAR包，然后创建UserCodeClassLoader
 			userCodeClassLoader = createUserCodeClassloader();
+			// 反序列化ExecutionConfig
 			final ExecutionConfig executionConfig = serializedExecutionConfig.deserializeValue(userCodeClassLoader);
-
+			// 获取taskCancellationInterval和taskCancellationTimeout参数
 			if (executionConfig.getTaskCancellationInterval() >= 0) {
 				// override task cancellation interval from Flink config if set in ExecutionConfig
 				taskCancellationInterval = executionConfig.getTaskCancellationInterval();

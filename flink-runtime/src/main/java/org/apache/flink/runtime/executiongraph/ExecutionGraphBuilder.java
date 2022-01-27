@@ -122,6 +122,29 @@ public class ExecutionGraphBuilder {
 			failoverStrategy);
 	}
 
+	/**
+	 * 建立ExecutionGraph
+	 * @param prior
+	 * @param jobGraph  用于构建ExecutionGraph使用的JobGraph对象
+	 * @param jobManagerConfig JobMaster的配置信息
+	 * @param futureExecutor ScheduledExecutorService实例，用于执行定时线程。
+	 * @param ioExecutor
+	 * @param slotProvider Slot资源提供者，实际上就是SlotPool实例
+	 * @param classLoader  通过JAR包构建用户的ClassLoader
+	 * @param recoveryFactory 用于恢复Checkpoint数据的工厂实现类。
+	 * @param rpcTimeout
+	 * @param restartStrategy 用于指定Task重启策略
+	 * @param metrics 用于记录当前JobManager中与Job相关的MetricGroup
+	 * @param blobWriter
+	 * @param allocationTimeout
+	 * @param log
+	 * @param shuffleMaster 当前Job使用的ShuffleMaster管理类，用于注册和管理Shuffle中创建的ResultPartition信息。
+	 * @param partitionTracker 用于监控和跟踪Job中所有Task的分区信息
+	 * @param failoverStrategyFactory 获取任务容错配置的工厂类，主要用创建FailoverStrategy，在Scheduler中会通过FailoverStrategy控制Task的容器策略。
+	 * @return
+	 * @throws JobExecutionException
+	 * @throws JobException
+	 */
 	public static ExecutionGraph buildGraph(
 		@Nullable ExecutionGraph prior,
 		JobGraph jobGraph,

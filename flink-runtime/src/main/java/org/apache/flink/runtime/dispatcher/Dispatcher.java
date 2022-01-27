@@ -380,16 +380,31 @@ public abstract class Dispatcher extends PermanentlyFencedRpcEndpoint<Dispatcher
 		}));
 	}
 
+	/**
+	 * 通过JobGraph运行Job，需要创建JobManager（JobMaster)
+	 * @param jobGraph
+	 * @return
+	 * 1. 确认JobManagerFutures集合中没有当前JobGraph的ID信息，否则抛出异常。
+	 * 2. 调用createJobManagerRunner()方法创建JobManagerRunner，然后返回CompletableFutrue。
+	 *    可以看出创建JobManagerRunner也是异步执行的，内部会调用jobManagerRunnerFactory.creatJobManagerRunner()方法创建JobManagerRunner。
+	 * 3. 将创建的JobManagerRunnerFuture对象添加到jobManagerRunnerFutures集合中，放在Job重复执行。
+	 * 4. 调用jobManagerRunnerFutrue.tenApply()方法，添加this::startJobManagerRunner对应的函数代码块，其中主要包含对JobManagerRunner的启动逻辑。
+	 * 5. 在JobManagerRunnerFuture中增加执行返回空值的处理操作。
+	 * 6. 调用JobManagerRunnerFuture.whenCompleteAsync()方法增加Future执行结束操作，判断是否有异常，如果有异常则从JobManagerRunnerFutures中移除JobID信息。
+	 */
 	private CompletableFuture<Void> runJob(JobGraph jobGraph) {
 		Preconditions.checkState(!jobManagerRunnerFutures.containsKey(jobGraph.getJobID()));
-
+		// 创建JobManagerRunner
 		final CompletableFuture<JobManagerRunner> jobManagerRunnerFuture = createJobManagerRunner(jobGraph);
-
+		// 将创建的jobManagerRunnerFuture添加的jobManagerRunnerFutures集合中
 		jobManagerRunnerFutures.put(jobGraph.getJobID(), jobManagerRunnerFuture);
-
+		// 增加JobManagerRunner启动操作
 		return jobManagerRunnerFuture
+			// 调用startJobManagerRunner()方法启动JobManagerRunner
 			.thenApply(FunctionUtils.uncheckedFunction(this::startJobManagerRunner))
+			// 执行返回空值的函数
 			.thenApply(FunctionUtils.nullFn())
+			// 增加Future执行结束操作，判断是否有异常，如果有，则从jobManagerRunnerFutures中移除JobID信息
 			.whenCompleteAsync(
 				(ignored, throwable) -> {
 					if (throwable != null) {

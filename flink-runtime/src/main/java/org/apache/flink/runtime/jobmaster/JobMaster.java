@@ -128,49 +128,92 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 	public static final String JOB_MANAGER_NAME = "jobmanager";
 
 	// ------------------------------------------------------------------------
-
+	/**
+	 * 主要定义了JobMaster服务中需要的参数，如rpcTimeout、slotRequestTimeout等。
+	 */
 	private final JobMasterConfiguration jobMasterConfiguration;
-
+	/**
+	 * JobMaster的唯一资源ID，用于区分不同的JobMaster服务
+	 */
 	private final ResourceID resourceId;
-
+	/**
+	 * 当前需要提交的Job对应的JobGraph，从Dispatcher中获取。
+	 */
 	private final JobGraph jobGraph;
-
+	/**
+	 * 定义JobMaster中RPC服务的超时时间。
+	 */
 	private final Time rpcTimeout;
-
+	/**
+	 * 高可用服务接口，主要用于获取ResourceManagerLeaderRetriever，可以通过resourceManagerLeaderRetriever
+	 * 获取ResourceManager的Leader节点。
+	 */
 	private final HighAvailabilityServices highAvailabilityServices;
-
+	/**
+	 * 用于将对象数据写入BlobStore，主要用于Task调度和执行过程中对TaskInformation进行持久化
+	 */
 	private final BlobWriter blobWriter;
-
+	/**
+	 * 创建和管理与TaskManager、ResourceManager组件之间的心跳服务。
+	 */
 	private final HeartbeatServices heartbeatServices;
-
+	/**
+	 * 创建JobMaster的MetricGroup对应的工厂类
+	 */
 	private final JobManagerJobMetricGroupFactory jobMetricGroupFactory;
-
+	/**
+	 * JDK中提供定时调度ExecutorService，主要用Task的调度和执行，
+	 * 提供Job执行状态切换过程中需要的定时调度服务。
+	 */
 	private final ScheduledExecutorService scheduledExecutorService;
-
+	/**
+	 * 主要定了Job到达终止状态时执行的操作，例如jobReachedGloballyTermianlState()定义了job完成操作。
+	 */
 	private final OnCompletionActions jobCompletionActions;
-
+	/**
+	 * 定义系统异常处理的Handle实现类。
+	 */
 	private final FatalErrorHandler fatalErrorHandler;
-
+	/**
+	 * JobGraph中对应的UserClassLoader实现类，主要用于加载和实例化用户编写的Flink应用代码
+	 */
 	private final ClassLoader userCodeLoader;
-
+	/**
+	 * 用于管理JobManager中的Slot资源，包括JobManager中的资源使用、分配、申请以及TaskManager的注册和释放、
+	 * 接收ResourceManager提供的Slot资源等。
+	 */
 	private final SlotPool slotPool;
-
+	/**
+	 * 主要继承和实现了SlotProvier和SlotOwner接口，提供了将Task分配到给定Slot的接口和方法，并和SlotPool配合使用。
+	 */
 	private final Scheduler scheduler;
-
+	/**
+	 * 创建schedulerNG调度器的工厂类
+	 */
 	private final SchedulerNGFactory schedulerNGFactory;
 
 	// --------- BackPressure --------
-
+	/**
+	 * 用于监听反压的状态追踪组件，获取指定算子当前的反压状态。
+	 */
 	private final BackPressureStatsTracker backPressureStatsTracker;
 
 	// --------- ResourceManager --------
-
+	/**
+	 * 获取ResourceManager Leader节点的组件，可以通过resourceManagerLeaderRetriever实时监控当前
+	 * ResourceManager Leader节点的状态返回最新的Leader节点。
+	 */
 	private final LeaderRetrievalService resourceManagerLeaderRetriever;
 
 	// --------- TaskManagers --------
-
+	/**
+	 * 注册在JobManager中的TaskExecutor信息，当有新的TaskExecutor启动时，通知JobLeaderService中的监听器，
+	 * 将TaskExecutor注册在registeredTaskManagers集合中
+	 */
 	private final Map<ResourceID, Tuple2<TaskManagerLocation, TaskExecutorGateway>> registeredTaskManagers;
-
+	/**
+	 * 主要用于注册和管理任务的Shffle信息。
+	 */
 	private final ShuffleMaster<?> shuffleMaster;
 
 	// -------- Mutable fields ---------
@@ -180,24 +223,40 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 	private HeartbeatManager<Void, Void> resourceManagerHeartbeatManager;
 
 	private SchedulerNG schedulerNG;
-
+	/**
+	 * Job状态的监听器，实现当Job的状态发生改变后的异步操作，例如在Job全部执行完毕后从高可用存储中移除当前的Job信息等。
+	 */
 	@Nullable
 	private JobManagerJobStatusListener jobStatusListener;
-
+	/**
+	 * 主要用于定义Job中产生的Metric监控指标并通过MetricGroup进行存储和管理。
+	 */
 	@Nullable
 	private JobManagerJobMetricGroup jobManagerJobMetricGroup;
-
+	/**
+	 * 存放ResourceManager的地址信息等内容。
+	 */
 	@Nullable
 	private ResourceManagerAddress resourceManagerAddress;
-
+	/**
+	 * 创建与ResourceManager之间的RPC连接。JobManager通过调用ResourceManagerGateway.registerJobManager()
+	 * 方法将自己注册到RsourceManager中。
+	 */
 	@Nullable
 	private ResourceManagerConnection resourceManagerConnection;
-
+	/**
+	 * 涵盖了JobManager与ResourceManager之间的连接信息，主要包括ResourceManagerGateway和ResourceID信息。
+	 */
 	@Nullable
 	private EstablishedResourceManagerConnection establishedResourceManagerConnection;
-
+	/**
+	 * 专门用于存储在Job中创建和用到的累加器
+	 */
 	private Map<String, Object> accumulators;
-
+	/**
+	 * 主要用于对Job中的Partition信息进行追踪，并提供startTrackingPartition()、stopTrackingAndReleasePartitions()等方法，
+	 * 启动和是否TaskExecutor及ShuffleMaster的Partition信息。
+	 */
 	private final JobMasterPartitionTracker partitionTracker;
 
 	// ------------------------------------------------------------------------
@@ -305,8 +364,9 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 	 */
 	public CompletableFuture<Acknowledge> start(final JobMasterId newJobMasterId) throws Exception {
 		// make sure we receive RPC and async calls
+		// 启动JobManager对应的RPC服务
 		start();
-
+		// 启动JobMaster并通过JobMaster执行分配的Job
 		return callAsyncWithoutFencing(() -> startJobExecution(newJobMasterId), RpcUtils.INF_TIMEOUT);
 	}
 
@@ -705,6 +765,19 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 
 	//-- job starting and stopping  -----------------------------------------------------------------
 
+	/**
+	 * 执行Job调度
+	 * @param newJobMasterId
+	 * @return
+	 * @throws Exception
+	 * 1. 检查当前RPC服务的主线程是否已正常运行，如未正常运行则抛出异常，同时检查并确保JobMasterId不为空。
+	 * 2. 调用getFencingToken()方法从RpcEndpoint服务中获取Fencing Token，并将其与当前的JobMasterId进行对比，
+	 *    如果二者相等，则表明该JobMasterId对应的Job已经启动，此时直接返回Ack，不再进行后续操作。
+	 * 3. 将新的JobMastId设定为Fencing Token，主要用于RPC通信过程中各个组件之间的Token认证。
+	 * 4. 调用startJobMasterServices()方法，启动JobMaster中的服务，包括HeartbeatServices、SlotPool及调度器服务等。
+	 * 5. 调用resetAndStartScheduler()方法，正式分配和开启Job调度器，开始Job的调度和执行。
+	 */
+
 	private Acknowledge startJobExecution(JobMasterId newJobMasterId) throws Exception {
 
 		validateRunsInMainThread();
@@ -722,27 +795,36 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 		startJobMasterServices();
 
 		log.info("Starting execution of job {} ({}) under job master id {}.", jobGraph.getName(), jobGraph.getJobID(), newJobMasterId);
-
+		// 重点方法，正式分配和开启Job调度器，开始Job的调度和执行
 		resetAndStartScheduler();
 
 		return Acknowledge.get();
 	}
 
+	/**
+	 * 启动JobManager的服务
+	 * @throws Exception
+	 */
 	private void startJobMasterServices() throws Exception {
+		// 启动JobMaster的HeartbeatService
 		startHeartbeatServices();
 
 		// start the slot pool make sure the slot pool now accepts messages for this leader
+		// 启动JobMaster中的slotpool服务，该服务主要负责JobManager的Slot资源管理
 		slotPool.start(getFencingToken(), getAddress(), getMainThreadExecutor());
+		// 启动JobMaster中的scheuler服务，该服务主要用负责Task的调度和执行
 		scheduler.start(getMainThreadExecutor());
 
 		//TODO: Remove once the ZooKeeperLeaderRetrieval returns the stored address upon start
 		// try to reconnect to previously known leader
+		// 创建RsourceManager连接，用于从RsourceManager中获取Slot资源
 		reconnectToResourceManager(new FlinkException("Starting JobMaster component."));
 
 		// job is ready to go, try to establish connection with resource manager
 		//   - activate leader retrieval for the resource manager
 		//   - on notification of the leader, the connection will be established and
 		//     the slot pool will start requesting slots
+		// 激活resourceManagerLeaderRetriever服务，获取ResourceManager的Leader节点。
 		resourceManagerLeaderRetriever.start(new ResourceManagerLeaderListener());
 	}
 
@@ -829,17 +911,29 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 		jobManagerJobMetricGroup = newJobManagerJobMetricGroup;
 	}
 
+	/**
+	 * 重点方法，正式分配和开启Job调度器，开始Job的调度和执行
+	 * @throws Exception
+	 * 1. 确认当前JobMaster对应的RPC服务主线程状态正常。
+	 * 2. 创建schedulerAssignedFuture，用于调度器的异步分配操作。
+	 * 3. 判断调度器中Job的状态是否为JobStatus.CREATED,然后为schedulerNG设定主线程池MainThreadExecutor
+	 * 4. 此时如果Job是其他状态，则需要重置ExecutionGraph，并调用createScheduler()方法重新创建SchedulerNG实例。
+	 * 5. 正式调用startScheduling()方法，启动任务调度并行执行ExecutionGraph中的节点。0
+	 */
 	private void resetAndStartScheduler() throws Exception {
+		// 确认RPC服务主线程状态正常
 		validateRunsInMainThread();
-
+		// 创建schedulerAssignedFuture，用于调度器的异步分配操作
 		final CompletableFuture<Void> schedulerAssignedFuture;
-
+		// 判断调取器中Job的状态为新创建，然后将MainThreadExecutor分配给schedulerNG调度器
 		if (schedulerNG.requestJobStatus() == JobStatus.CREATED) {
 			schedulerAssignedFuture = CompletableFuture.completedFuture(null);
 			schedulerNG.setMainThreadExecutor(getMainThreadExecutor());
 		} else {
+			// 如果job为其他状态，则需要重置ExecutionGraph，并创建新的调度器分配给当前Job
 			suspendAndClearSchedulerFields(new FlinkException("ExecutionGraph is being reset in order to be rescheduled."));
 			final JobManagerJobMetricGroup newJobManagerJobMetricGroup = jobMetricGroupFactory.create(jobGraph);
+			// 创建SchedulerNG调度器
 			final SchedulerNG newScheduler = createScheduler(newJobManagerJobMetricGroup);
 
 			schedulerAssignedFuture = schedulerNG.getTerminationFuture().handle(
@@ -850,7 +944,7 @@ public class JobMaster extends FencedRpcEndpoint<JobMasterId> implements JobMast
 				}
 			);
 		}
-
+		// 正式开始Job的任务调度，分别执行ExecutionGraph中的节点
 		schedulerAssignedFuture.thenRun(this::startScheduling);
 	}
 

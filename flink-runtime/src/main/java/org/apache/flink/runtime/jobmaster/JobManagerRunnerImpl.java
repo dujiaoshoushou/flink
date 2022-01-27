@@ -300,14 +300,22 @@ public class JobManagerRunnerImpl implements LeaderContender, OnCompletionAction
 		}
 	}
 
+	/**
+	 * 验证作业调度状态并启动作业管理器
+	 * @param leaderSessionId
+	 * @return
+	 */
 	private CompletableFuture<Void> verifyJobSchedulingStatusAndStartJobManager(UUID leaderSessionId) {
+		// 获取Job调度状态
 		final CompletableFuture<JobSchedulingStatus> jobSchedulingStatusFuture = getJobSchedulingStatus();
-
+		// 判断Job调度的状态是否已完成
 		return jobSchedulingStatusFuture.thenCompose(
 			jobSchedulingStatus -> {
+				// 如果JobStatus为JobSchedulingStatus.DONE,则调用jobAlreadyDone方法
 				if (jobSchedulingStatus == JobSchedulingStatus.DONE) {
 					return jobAlreadyDone();
 				} else {
+					// 如果Job没有执行，则启动JobMaster
 					return startJobMaster(leaderSessionId);
 				}
 			});
@@ -318,6 +326,7 @@ public class JobManagerRunnerImpl implements LeaderContender, OnCompletionAction
 			jobGraph.getName(), jobGraph.getJobID(), leaderSessionId, jobMasterService.getAddress());
 
 		try {
+			// 注册Job信息到runningJobsRegistry
 			runningJobsRegistry.setJobRunning(jobGraph.getJobID());
 		} catch (IOException e) {
 			return FutureUtils.completedExceptionally(
@@ -328,6 +337,7 @@ public class JobManagerRunnerImpl implements LeaderContender, OnCompletionAction
 
 		final CompletableFuture<Acknowledge> startFuture;
 		try {
+			// 启动JobMasterService并调度执行整个JobGraph对应的作业
 			startFuture = jobMasterService.start(new JobMasterId(leaderSessionId));
 		} catch (Exception e) {
 			return FutureUtils.completedExceptionally(new FlinkException("Failed to start the JobMaster.", e));

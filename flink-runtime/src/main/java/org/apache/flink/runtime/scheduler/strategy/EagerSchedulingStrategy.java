@@ -68,11 +68,13 @@ public class EagerSchedulingStrategy implements SchedulingStrategy {
 	}
 
 	private void allocateSlotsAndDeploy(final Set<ExecutionVertexID> verticesToDeploy) {
+		// 将需要不是执行的ExecutionVertexID集合转换成ExecutionVertexDeploymentOption集合
 		final List<ExecutionVertexDeploymentOption> executionVertexDeploymentOptions =
 			SchedulingStrategyUtils.createExecutionVertexDeploymentOptionsInTopologicalOrder(
 				schedulingTopology,
 				verticesToDeploy,
 				id -> deploymentOption);
+		// 调用schedulerOperations.allocateSlotsAndDeploy()方法部署ExecutionVertex
 		schedulerOperations.allocateSlotsAndDeploy(executionVertexDeploymentOptions);
 	}
 

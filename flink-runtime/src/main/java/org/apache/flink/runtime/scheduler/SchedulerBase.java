@@ -247,11 +247,11 @@ public abstract class SchedulerBase implements SchedulerNG {
 		JobManagerJobMetricGroup currentJobManagerJobMetricGroup,
 		ShuffleMaster<?> shuffleMaster,
 		final JobMasterPartitionTracker partitionTracker) throws JobExecutionException, JobException {
-
+		// 获取FailoverStrategy.Factory，用于任务错误恢复
 		final FailoverStrategy.Factory failoverStrategy = legacyScheduling ?
 			FailoverStrategyLoader.loadFailoverStrategy(jobMasterConfiguration, log) :
 			new NoOpFailoverStrategy.Factory();
-
+		// 调用ExecutionGraphBuilder.buildGraph从JobGraph中创建ExecutionGraph
 		return ExecutionGraphBuilder.buildGraph(
 			null,
 			jobGraph,

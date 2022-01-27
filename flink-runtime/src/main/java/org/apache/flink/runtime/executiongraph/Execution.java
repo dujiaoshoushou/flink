@@ -684,10 +684,21 @@ public class Execution implements AccessExecution, Archiveable<ArchivedExecution
 	 * Deploys the execution to the previously assigned resource.
 	 *
 	 * @throws JobException if the execution cannot be deployed to the assigned resource
+	 * 1. 检查JobMasterMainThread状态是否为Running
+	 * 2. 获取已经分配给当前Execution的Slot计算资源。
+	 * 3. 检查Slot中对应的TaskManager是否存在，如果该Slot分配的TaskManager不存在，则抛出异常。
+	 * 4. 判断当前ExecutionState是否为SCHEDULED或CREATED，如果都不是，表示当前Execution已经被取消或执行，否则抛出异常。
+	 * 5. 判断当前Execution分配的Slot计算资源的有效性。
+	 * 6. 检查当前Execution的状态，如果状态不是DEPLOYING，则释放资源
+	 * 7. 创建TaskDeploymentDescriptor，主要用于描述Task部署信息，TaskManager会在本地进程中接收到TaskeDeploymentDescriptor的消息并解析，
+	 *    然后启动Task线程并处理数据。
+	 * 8. 从Slot配置信息中获取TaskManagerGateWay实例，调用taskManagerGateway.submitTask()方法将创建的创建TaskDeploymentDescriptor信息
+	 *    提交到TaskExecutor中，如果出现异常，则调用markFailed()方法更新Task的运行状态。
 	 */
 	public void deploy() throws JobException {
+		// 确认JobMasterMainThread状态为Running
 		assertRunningInJobMasterMainThread();
-
+		// 获取已经分配的Slot资源
 		final LogicalSlot slot  = assignedResource;
 
 		checkNotNull(slot, "In order to deploy the execution we first have to assign a resource via tryAssignResource.");
@@ -695,12 +706,14 @@ public class Execution implements AccessExecution, Archiveable<ArchivedExecution
 		// Check if the TaskManager died in the meantime
 		// This only speeds up the response to TaskManagers failing concurrently to deployments.
 		// The more general check is the rpcTimeout of the deployment call
+		// 检查并判断当前的Slot对应的TaskManager是否存活，如果该Slot分配的TaskManager不存活，则抛出异常
 		if (!slot.isAlive()) {
 			throw new JobException("Target slot (TaskManager) for deployment is no longer alive.");
 		}
 
 		// make sure exactly one deployment call happens from the correct state
 		// note: the transition from CREATED to DEPLOYING is for testing purposes only
+		// 判断当前的ExecutionState是否为SCHEDULED或者CREATED，如果不是则抛出异常
 		ExecutionState previous = this.state;
 		if (previous == SCHEDULED || previous == CREATED) {
 			if (!transitionState(previous, DEPLOYING)) {
@@ -711,9 +724,10 @@ public class Execution implements AccessExecution, Archiveable<ArchivedExecution
 		}
 		else {
 			// vertex may have been cancelled, or it was already scheduled
+			// 表示当前的Execution已经被取消或已经执行
 			throw new IllegalStateException("The vertex must be in CREATED or SCHEDULED state to be deployed. Found state " + previous);
 		}
-
+		// 判断当前Execution分配的Slot资源的有效性
 		if (this != slot.getPayload()) {
 			throw new IllegalStateException(
 				String.format("The execution %s has not been assigned to the assigned slot.", this));
@@ -722,6 +736,7 @@ public class Execution implements AccessExecution, Archiveable<ArchivedExecution
 		try {
 
 			// race double check, did we fail/cancel and do we need to release the slot?
+			// 检查当前Execution的状态，如果状态不是DEPLOYING，则释放资源
 			if (this.state != DEPLOYING) {
 				slot.releaseSlot(new FlinkException("Actual state of execution " + this + " (" + state + ") does not match expected state DEPLOYING."));
 				return;
@@ -731,7 +746,7 @@ public class Execution implements AccessExecution, Archiveable<ArchivedExecution
 				LOG.info(String.format("Deploying %s (attempt #%d) to %s", vertex.getTaskNameWithSubtaskIndex(),
 						attemptNumber, getAssignedResourceLocation()));
 			}
-
+			// 创建TaskDeploymentDescriptor，用于Task部署到TaskManager
 			final TaskDeploymentDescriptor deployment = TaskDeploymentDescriptorFactory
 				.fromExecutionVertex(vertex, attemptNumber)
 				.createDeploymentDescriptor(
@@ -741,20 +756,23 @@ public class Execution implements AccessExecution, Archiveable<ArchivedExecution
 					producedPartitions.values());
 
 			// null taskRestore to let it be GC'ed
+			// 将taskRestStore置空，进行GC回收
 			taskRestore = null;
-
+			// 获取TaskManagerGateway
 			final TaskManagerGateway taskManagerGateway = slot.getTaskManagerGateway();
-
+			// 获取jobMasterMainThreadExecutor运行线程池
 			final ComponentMainThreadExecutor jobMasterMainThreadExecutor =
 				vertex.getExecutionGraph().getJobMasterMainThreadExecutor();
 
 			// We run the submission in the future executor so that the serialization of large TDDs does not block
 			// the main thread and sync back to the main thread once submission is completed.
+			// 调用taskManagerGateway.submitTask()方法提交deployment对象到TaskExecutor中
 			CompletableFuture.supplyAsync(() -> taskManagerGateway.submitTask(deployment, rpcTimeout), executor)
 				.thenCompose(Function.identity())
 				.whenCompleteAsync(
 					(ack, failure) -> {
 						// only respond to the failure case
+						// 如果出现异常，则调用markFailed()方法更新Task运行状态
 						if (failure != null) {
 							if (failure instanceof TimeoutException) {
 								String taskname = vertex.getTaskNameWithSubtaskIndex() + " (" + attemptId + ')';

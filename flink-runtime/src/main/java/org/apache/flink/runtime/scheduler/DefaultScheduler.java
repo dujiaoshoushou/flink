@@ -478,7 +478,9 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
 
 	private void deployTaskSafe(final ExecutionVertexID executionVertexId) {
 		try {
+			// 获取ExecutionVertex节点
 			final ExecutionVertex executionVertex = getExecutionVertex(executionVertexId);
+			// 通过executionVertexOperations部署获取到的executionVertex
 			executionVertexOperations.deploy(executionVertex);
 		} catch (Throwable e) {
 			handleTaskDeploymentFailure(executionVertexId, e);
