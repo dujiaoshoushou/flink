@@ -55,6 +55,9 @@ import static org.apache.flink.streaming.runtime.tasks.mailbox.TaskMailbox.MIN_P
  *
  * <p>This class has a open-prepareClose-close lifecycle that is connected with and maps to the lifecycle of the
  * encapsulated {@link TaskMailbox} (which is open-quiesce-close).
+ *
+ * 定义了Mailbox中的Mail和MailboxDefaultAction之间的处理逻辑，在runMailboxLoop()循环方法中处理Mail和DefaultAction。
+ * 同时在MailboxProcessor中提供MailboxController用于控制Mailbox中的LoopRunning以及暂停和恢复MailboxDefaultAction
  */
 @Internal
 public class MailboxProcessor implements Closeable {
@@ -172,17 +175,17 @@ public class MailboxProcessor implements Closeable {
 	 * Runs the mailbox processing loop. This is where the main work is done.
 	 */
 	public void runMailboxLoop() throws Exception {
-
+		// 获取最新的TaskMailbox并设定为本地TaskMailbox
 		final TaskMailbox localMailbox = mailbox;
-
+		// 检查MailBox线程状态
 		Preconditions.checkState(
 			localMailbox.isMailboxThread(),
 			"Method must be executed by declared mailbox thread!");
-
+		// 确认TaskMailbox.State为开启状态
 		assert localMailbox.getState() == TaskMailbox.State.OPEN : "Mailbox must be opened!";
-
+		// 创建MailboxController
 		final MailboxController defaultActionContext = new MailboxController(this);
-
+		// 循环执行processMail()方法从localMailbox中获取Action
 		while (processMail(localMailbox)) {
 			mailboxDefaultAction.runDefaultAction(defaultActionContext); // lock is acquired inside default action as needed
 		}

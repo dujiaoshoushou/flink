@@ -69,6 +69,10 @@ import java.util.concurrent.RejectedExecutionException;
  *     }
  * }
  * }</pre>
+ *
+ * 提供了直接向TaskMailbox提交Mail的操作，例如：StreamTask中触发CheckPoint的同时会将具体的执行方法提交到Mailbox中调用和处理。
+ * 在MailboxExecutor中也提供了yield()方法从TaskMailbox中获取Mail并执行，这里主要用于SavePoint操作，调用yield()方法将TaskMailbox
+ * 中的Mail逐步执行完毕后停止任务。
  */
 @PublicEvolving
 public interface MailboxExecutor {

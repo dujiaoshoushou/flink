@@ -21,6 +21,9 @@ import org.apache.flink.annotation.Internal;
 
 /**
  * Interface for the default action that is repeatedly invoked in the mailbox-loop.
+ * 定义了当前StreamTask的默认数据处理逻辑，包括对Watermark等事件已经StreamElement数据元素的处理。
+ * 在创建StreamTask的过程中会将StreamTask.processInput()方法作为创建MailboxProcessor中的MailboxDefaultAction
+ * 操作，在StreamTask.processInput()方法中定义了具体数据元素接入和处理的逻辑。
  */
 @Internal
 public interface MailboxDefaultAction {

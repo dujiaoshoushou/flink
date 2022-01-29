@@ -166,31 +166,44 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 	@Nullable
 	protected StreamInputProcessor inputProcessor;
 
-	/** the head operator that consumes the input streams of this task. */
+	/** the head operator that consumes the input streams of this task.
+	 * 指定当前StreamTask的头部算子，即OperatorChain中的第一个算子，
+	 * StreamTask负责从输入数据流中接入数据，并传递给OperatorChain中的headOperator继续处理。
+	 * */
 	protected OP headOperator;
 
-	/** The chain of operators executed by this task. */
+	/** The chain of operators executed by this task.
+	 * 在StreamTask构建过程中会合并Operator，形成operatorChain，
+	 * operatorChain中的所有Operator都会被执行在同一Task实例中。
+	 * */
 	protected OperatorChain<OUT, OP> operatorChain;
 
 	/** The configuration of this streaming task. */
 	protected final StreamConfig configuration;
 
-	/** Our state backend. We use this to create checkpoint streams and a keyed state backend. */
+	/** Our state backend. We use this to create checkpoint streams and a keyed state backend.
+	 * StreamTask执行过程中使用的状态后端，用于管理StreamTask运行过程中产生的状态数据。
+	 * */
 	protected StateBackend stateBackend;
 
-	/** The external storage where checkpoint data is persisted. */
+	/** The external storage where checkpoint data is persisted.
+	 * 用于对CheckPoint过程中的状态数据进行外部持久化。
+	 * */
 	private CheckpointStorageWorkerView checkpointStorage;
 
 	/**
 	 * The internal {@link TimerService} used to define the current
 	 * processing time (default = {@code System.currentTimeMillis()}) and
 	 * register timers for tasks to be executed in the future.
+	 * Task执行过程中用到的定时器服务
 	 */
 	protected TimerService timerService;
 
 	private final Thread.UncaughtExceptionHandler uncaughtExceptionHandler;
 
-	/** The map of user-defined accumulators of this task. */
+	/** The map of user-defined accumulators of this task.
+	 * 用于存储累加器数据，用户自定义的累加器会存放在accumulatorMap中
+	 * */
 	private final Map<String, Accumulator<?, ?>> accumulatorMap;
 
 	/** The currently active background materialization threads. */
@@ -209,11 +222,16 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 
 	private boolean disposedOperators;
 
-	/** Thread pool for async snapshot workers. */
+	/** Thread pool for async snapshot workers.
+	 * CheckPoint操作对状态数据进行快照操作时所用的异步线程池，目的是避免CheckPoint操作阻塞主线程的计算人。
+	 * */
 	private ExecutorService asyncOperationsThreadPool;
 
 	private final RecordWriterDelegate<SerializationDelegate<StreamRecord<OUT>>> recordWriter;
-
+	/**
+	 * 采用类似Actor模型的邮箱机制取代之前的多线程模型，让Task执行的过程变为单线程（mailbox线程）加阻塞队列的形式，
+	 * 从而更好地解决由于多线程加对象锁带来的问题。
+	 */
 	protected final MailboxProcessor mailboxProcessor;
 
 	private Long syncSavepointId = null;
@@ -308,16 +326,21 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 	 * @throws Exception on any problems in the action.
 	 */
 	protected void processInput(MailboxDefaultAction.Controller controller) throws Exception {
+		// 调用inputProcessor.processInput()方法处理数据
 		InputStatus status = inputProcessor.processInput();
 		if (status == InputStatus.MORE_AVAILABLE && recordWriter.isAvailable()) {
 			return;
 		}
+		// 状态为END_OF_INPUT，调用controller结束Task作业
 		if (status == InputStatus.END_OF_INPUT) {
 			controller.allActionsCompleted();
 			return;
 		}
+		// 如果意思状态都不是
 		CompletableFuture<?> jointFuture = getInputOutputJointFuture(status);
+		// 获取suspendedDefaultAction
 		MailboxDefaultAction.Suspension suspendedDefaultAction = controller.suspendDefaultAction();
+		// 重新启动挂起的DefaultAction
 		jointFuture.thenRun(suspendedDefaultAction::resume);
 	}
 
@@ -411,12 +434,19 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 		}
 	}
 
+	/**
+	 * 1. 创建stateBackend实例，根据StateBackend创建checkpointStorage，用于存储CheckPoint过程中的数据。
+	 * 2.  创建和初始化OperatorChain，并获取OperatorChain的HeadOperator。
+	 * 3. 调用init()抽象方法，由StreamTask子类实现，用于初始化不同Task实例的内部逻辑。
+	 * 4. 调用initializeStateAndOpen()方法初始化状态数据并开启Operator。
+	 * @throws Exception
+	 */
 	private void beforeInvoke() throws Exception {
 		disposedOperators = false;
 		LOG.debug("Initializing {}.", getName());
 
 		asyncOperationsThreadPool = Executors.newCachedThreadPool(new ExecutorThreadFactory("AsyncOperations", uncaughtExceptionHandler));
-
+		// 创建stateBackend实例
 		stateBackend = createStateBackend();
 		checkpointStorage = stateBackend.createCheckpointStorage(getEnvironment().getJobID());
 
@@ -434,6 +464,7 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 		headOperator = operatorChain.getHeadOperator();
 
 		// task specific initialization
+		// TODO 调用子类中实现的初始化方法，用于构建StreamInputProcessor并最终通过StreamInputProcessor处理数据。
 		init();
 
 		// save the work of reloading state, etc, if the task is already canceled
@@ -458,23 +489,27 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 	@Override
 	public final void invoke() throws Exception {
 		try {
+			// 执行算子前的准备工作
 			beforeInvoke();
 
 			// final check to exit early before starting to run
+			// 检查StreamTask是否被取消
 			if (canceled) {
 				throw new CancelTaskException();
 			}
 
 			// let the task do its work
+			// Task执行工作
 			isRunning = true;
 			runMailboxLoop();
 
 			// if this left the run() method cleanly despite the fact that this was canceled,
 			// make sure the "clean shutdown" is not attempted
+			// 再次检查算子是否被取消
 			if (canceled) {
 				throw new CancelTaskException();
 			}
-
+			// 执行Invoke之后的逻辑
 			afterInvoke();
 		}
 		finally {

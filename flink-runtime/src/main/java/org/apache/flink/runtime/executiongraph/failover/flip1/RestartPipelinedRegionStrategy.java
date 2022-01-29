@@ -95,14 +95,19 @@ public class RestartPipelinedRegionStrategy implements FailoverStrategy {
 	// ------------------------------------------------------------------------
 
 	private void buildFailoverRegions() {
+		// 通过FailoverTopology构建所有不同的Region
 		final Set<? extends Set<? extends FailoverVertex<?, ?>>> distinctRegions =
 			PipelinedRegionComputeUtil.computePipelinedRegions(topology);
 
 		// creating all the failover regions and register them
+		// 创建所有容错分区并保存
 		for (Set<? extends FailoverVertex<?, ?>> regionVertices : distinctRegions) {
 			LOG.debug("Creating a failover region with {} vertices.", regionVertices.size());
+			// 根据regionVertices创建FailoverRegion
 			final FailoverRegion failoverRegion = new FailoverRegion(regionVertices);
+			// 将创建好的FailoverRegion添加到regions集合中
 			regions.add(failoverRegion);
+			// 遍历region中的FailoverVertex，并分别添加到vertexToRegionMap映射中
 			for (FailoverVertex<?, ?> vertex : regionVertices) {
 				vertexToRegionMap.put(vertex.getId(), failoverRegion);
 			}

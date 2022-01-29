@@ -26,6 +26,9 @@ import java.util.concurrent.Future;
 
 /**
  * An executable bound to a specific operator in the chain, such that it can be picked for downstream mailbox.
+ * 定义具有算子中的可执行操作，Mail主要使用RunnableWithException作为参数，和Runnable类似，用于捕获需要执行的代码，
+ * 但和Runnable不同的是RunnableWithException允许抛出检查异常。同时在Mail中还有priority参数控制Mail执行的优先级，
+ * 以防止出现死锁现象。
  */
 @Internal
 public class Mail {

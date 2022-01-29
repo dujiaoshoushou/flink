@@ -58,6 +58,10 @@ import java.util.Optional;
  * where it may lead to a {@link MailboxExecutor#yield()} triggering another consumption method. If we extend the
  * batch in any way during that processing, we effectively lose the bounded processing guarantee of mails inside the
  * mailbox loop.
+ *
+ * 主要用于存储提交的Mail并提供获取接口，TaskMailbox主要含有两个队列，分别为queue和batch。其中queue是一个阻塞队列，通过ReentrantLock控制
+ * 队列的读写操作，而batch是一个非阻塞队列，当调用createBatch()方法时会将queue中的Mail存储到batch中，这样读操作就通过调用tryTakeFromBatch()
+ * 方法批量获取到Mail，且只能被mailbox thread消费。
  */
 @Internal
 public interface TaskMailbox {

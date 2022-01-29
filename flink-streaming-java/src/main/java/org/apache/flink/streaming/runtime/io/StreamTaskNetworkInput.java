@@ -112,28 +112,44 @@ public final class StreamTaskNetworkInput<T> implements StreamTaskInput<T> {
 		this.inputIndex = inputIndex;
 	}
 
+	/**
+	 * 1. 循环调用checkpointedInputGate.pollNext()方法获取数据，从网络接入的数据是通过InputGate的InputChannel接入的。
+	 * 2. 从InputGate中接入的数据格式为Optional bufferOrEvent，换句话讲，网络传输的数据即包含buffer类型数据，也含有事件数据，这里的事件指得是Watermark等。
+	 * 3. 如果产生了bufferOrEvent数据，则会调用processBufferOrEvent()方法进行处理，主要会对bufferOrEvent数据进行反序列化处理，转成成具体的StreamRecord。
+	 * 4.解析出来的StreamRecord数据会存放在currentRecordDeserializer实例中，通过判断currentRecordDeserializer是否为空，
+	 *   从currentRecordDeserializer获取DeserializationResult
+	 * 5. 如果获取结果中的Buffer已经被消费，则对Buffer数据占用的内存空间进行回收。
+	 * 6. 如果获取结果是完整的Record记录，则调用processElement()方法对数据元素进行处理。
+	 * 7. 处理完毕后退出循环并返回MORE_AVAILAVLE状态，继续等待新的数据接入。
+	 */
 	@Override
 	public InputStatus emitNext(DataOutput<T> output) throws Exception {
-
+		// 循环获取数据
 		while (true) {
 			// get the stream element from the deserializer
+			// 从currentRecordDeserializer中获取StreamElement
 			if (currentRecordDeserializer != null) {
+				// 获取DeserializationResult
 				DeserializationResult result = currentRecordDeserializer.getNextRecord(deserializationDelegate);
+				// 如果Buffer已经被消费，则对Buffer数据占用的内存空间进行回收
 				if (result.isBufferConsumed()) {
 					currentRecordDeserializer.getCurrentBuffer().recycleBuffer();
 					currentRecordDeserializer = null;
 				}
-
+				// 如果结果是完整的Record记录，则调用processElement()方法进行处理
 				if (result.isFullRecord()) {
 					processElement(deserializationDelegate.getInstance(), output);
+					// 处理完毕后退出循环并返回MORE_AVAILABLE状态，等待下一次计算
 					return InputStatus.MORE_AVAILABLE;
 				}
 			}
-
+			// 从checkpointedInputGate中拉取数据
 			Optional<BufferOrEvent> bufferOrEvent = checkpointedInputGate.pollNext();
+			// 如果bufferOrEvent有数据产生，则调用processBufferOrEvent()进行处理
 			if (bufferOrEvent.isPresent()) {
 				processBufferOrEvent(bufferOrEvent.get());
 			} else {
+				// 如果checkpointedInputGate中已经没有数据，则返回END_OF_INPUT结束计算，否则返回NOTHING_AVAILABLE
 				if (checkpointedInputGate.isFinished()) {
 					checkState(checkpointedInputGate.getAvailableFuture().isDone(), "Finished BarrierHandler should be available");
 					if (!checkpointedInputGate.isEmpty()) {
@@ -148,12 +164,16 @@ public final class StreamTaskNetworkInput<T> implements StreamTaskInput<T> {
 
 	private void processElement(StreamElement recordOrMark, DataOutput<T> output) throws Exception {
 		if (recordOrMark.isRecord()){
+			// 处理StreamRecord类型数据
 			output.emitRecord(recordOrMark.asRecord());
 		} else if (recordOrMark.isWatermark()) {
+			// 处理Watermark类型数据
 			statusWatermarkValve.inputWatermark(recordOrMark.asWatermark(), lastChannel);
 		} else if (recordOrMark.isLatencyMarker()) {
+			// 处理LatencyMarker类型数据
 			output.emitLatencyMarker(recordOrMark.asLatencyMarker());
 		} else if (recordOrMark.isStreamStatus()) {
+			// 处理StreamStatus类型数据
 			statusWatermarkValve.inputStreamStatus(recordOrMark.asStreamStatus(), lastChannel);
 		} else {
 			throw new UnsupportedOperationException("Unknown type of StreamElement");

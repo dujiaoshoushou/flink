@@ -1354,15 +1354,27 @@ public class ExecutionGraph implements AccessExecutionGraph {
 	 * RESTARTING.
 	 *
 	 * @return true if the operation could be executed; false if a concurrent job status change occurred
+	 * 1. 判断当前执行的调度器是否为LegacyScheduling，如果不是则返回true，也就是启动DefaultScheduler中的重启策略。
+	 * 2. 获取ExecutionGraph的currentState，判断当前状态是否为JobStatus.FALING或JobStatus.RESTARTING中的一种，
+	 *    如果是则继续后续的重启步骤，如果不是则返回False，因为其他状态下不支持重启。
+	 * 3. 根据当前failureCause判断ExecutionGraph是否支持重启，并判断当前ExecutionGraph中RestartStrategy的配置是否支持重启，
+	 *    结合两者的结果判断当前ExecutionGraph是否支持重启，并将值赋予isRestartable变量。
+	 * 4. 如果ExecutionGraph支持重启，将currentStateshez为RESTARTING并重启整个Job。
+	 * 5. 在重启过程中需要创建ExecutionGraphRestartCallback回调函数，在ExecutionGraphRestartCallback类中封装了具体的重启操作，
+	 *    细节由RestartStrategy定义，这样在RestartStrategy中就能够运行不同的执行策略。
+	 * 6. 如果重启过程中出现了异常，则调用failGlobal()方法进行后续处理。
+	 * 7. 如果当ExecutionGraph不支持重启，就会出现isRestartable为false的情况，将ExecutionGraph的currentState设为FALIED,
+	 *    期间会调用onTerminalState()方法关闭checkpoint等操作。
 	 */
 	@Deprecated
 	private boolean tryRestartOrFail(long globalModVersionForRestart) {
+		// 判断调度器是否为LegacyScheduling
 		if (!isLegacyScheduling()) {
 			return true;
 		}
 
 		JobStatus currentState = state;
-
+		// 获取ExecutionGraph的currentState
 		if (currentState == JobStatus.FAILING || currentState == JobStatus.RESTARTING) {
 			final Throwable failureCause = this.failureCause;
 
@@ -1371,24 +1383,29 @@ public class ExecutionGraph implements AccessExecutionGraph {
 			} else {
 				LOG.info("Try to restart or fail the job {} ({}) if no longer possible.", getJobName(), getJobID());
 			}
-
+			// 判断当前failureCause是否允许重启
 			final boolean isFailureCauseAllowingRestart = !(failureCause instanceof SuppressRestartsException);
+			// 判断当前restartStrategy是否允许重启
 			final boolean isRestartStrategyAllowingRestart = restartStrategy.canRestart();
+			// 根据以上条件判断整个job是否能重启
 			boolean isRestartable = isFailureCauseAllowingRestart && isRestartStrategyAllowingRestart;
-
+			// 如果支持重启，将currentState置为RESTARTING
 			if (isRestartable && transitionState(currentState, JobStatus.RESTARTING)) {
 				LOG.info("Restarting the job {} ({}).", getJobName(), getJobID());
-
+				// 创建ExecutionGraphRestartCallback重启回调函数
 				RestartCallback restarter = new ExecutionGraphRestartCallback(this, globalModVersionForRestart);
 				FutureUtils.assertNoException(
+					// 通过restartStrategy执行创建的RestartCallback回调函数
 					restartStrategy
 						.restart(restarter, getJobMasterMainThreadExecutor())
 						.exceptionally((throwable) -> {
+							// 如果出现异常则调用failGlobal()方法进行处理。
 								failGlobal(throwable);
 								return null;
 							}));
 				return true;
 			}
+			// 如果当前ExecutionGraph不支持重启，则将currentState置为FAILED
 			else if (!isRestartable && transitionState(currentState, JobStatus.FAILED, failureCause)) {
 				final String cause1 = isFailureCauseAllowingRestart ? null :
 					"a type of SuppressRestartsException was thrown";
@@ -1397,6 +1414,7 @@ public class ExecutionGraph implements AccessExecutionGraph {
 
 				LOG.info("Could not restart the job {} ({}) because {}.", getJobName(), getJobID(),
 					StringUtils.concatenateWithAnd(cause1, cause2), failureCause);
+				// 调用onTerminalState()方法关闭CheckPoint操作
 				onTerminalState(JobStatus.FAILED);
 
 				return true;
@@ -1406,6 +1424,7 @@ public class ExecutionGraph implements AccessExecutionGraph {
 			}
 		} else {
 			// this operation is only allowed in the state FAILING or RESTARTING
+			// 仅支持FAILING和RESTARTING状态
 			return false;
 		}
 	}

@@ -1267,6 +1267,7 @@ public class Execution implements AccessExecution, Archiveable<ArchivedExecution
 			}
 
 			if (!fromSchedulerNg && !isLegacyScheduling()) {
+				// 调用notifySchedulerNgAboutInternalTaskFailure
 				vertex.getExecutionGraph().notifySchedulerNgAboutInternalTaskFailure(attemptId, t);
 
 				// HACK: We informed the new generation scheduler about an internally detected task
@@ -1274,23 +1275,26 @@ public class Execution implements AccessExecution, Archiveable<ArchivedExecution
 				// always set to false, isCallback to true and fromSchedulerNg set to true.
 				// Because the original value of releasePartitions and isCallback will be lost,
 				// we may need to invoke partition release and remote canceling here.
+				// 是否Partition信息并取消TaskManager中的Task
 				maybeReleasePartitionsAndSendCancelRpcCall(current, isCallback, releasePartitions);
 
 				return;
 			} else if (transitionState(current, FAILED, t)) {
 				// success (in a manner of speaking)
+				// 如果是失败状态，则停止Task作业
 				this.failureCause = t;
-
+				// 更新Accumulators和Metrics信息
 				updateAccumulatorsAndMetrics(userAccumulators, metrics);
-
+				// 释放计算资源
 				releaseAssignedResource(t);
+				// 从ExecutionGraph中注销当前Execution
 				vertex.getExecutionGraph().deregisterExecution(this);
-
+				// 如果基于LegacyScheduler，则还需要调用maybeReleasePartitionsAndSendCancelRpcCall()方法释放Partition并取消Task
 				if (isLegacyScheduling()) {
 					maybeReleasePartitionsAndSendCancelRpcCall(current, isCallback, releasePartitions);
 				}
 
-				// leave the loop
+				// leave the loop 跳出循环
 				return;
 			}
 		}

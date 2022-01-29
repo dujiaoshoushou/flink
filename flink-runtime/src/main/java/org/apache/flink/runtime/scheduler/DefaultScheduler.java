@@ -176,7 +176,9 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
 
 	@Override
 	protected void updateTaskExecutionStateInternal(final ExecutionVertexID executionVertexId, final TaskExecutionState taskExecutionState) {
+		// 通知schedulingStrategy，ExecutionState发生了改变
 		schedulingStrategy.onExecutionStateChange(executionVertexId, taskExecutionState.getExecutionState());
+		// 调用maybeHandleTaskFailure()方法处理异常Task
 		maybeHandleTaskFailure(taskExecutionState, executionVertexId);
 	}
 
@@ -188,8 +190,11 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
 	}
 
 	private void handleTaskFailure(final ExecutionVertexID executionVertexId, @Nullable final Throwable error) {
+		// 设定全局重启失败原因
 		setGlobalFailureCause(error);
+		// 获取FailureHandlingResult
 		final FailureHandlingResult failureHandlingResult = executionFailureHandler.getFailureHandlingResult(executionVertexId, error);
+		// 调用maybeRestartTasks()方法重启Task
 		maybeRestartTasks(failureHandlingResult);
 	}
 
@@ -203,23 +208,24 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
 	}
 
 	private void maybeRestartTasks(final FailureHandlingResult failureHandlingResult) {
-		if (failureHandlingResult.canRestart()) {
+		if (failureHandlingResult.canRestart()) { // 如果能够重启，则调用restartTasksWithDelay()方法进行重启
 			restartTasksWithDelay(failureHandlingResult);
 		} else {
-			failJob(failureHandlingResult.getError());
+			failJob(failureHandlingResult.getError()); // 否则调用failJob()方法停止任务
 		}
 	}
 
 	private void restartTasksWithDelay(final FailureHandlingResult failureHandlingResult) {
+		// 从failureHandlingResult中获取ExecutionVertexID集合
 		final Set<ExecutionVertexID> verticesToRestart = failureHandlingResult.getVerticesToRestart();
-
+		// 记录Execution节点的版本
 		final Set<ExecutionVertexVersion> executionVertexVersions =
 			new HashSet<>(executionVertexVersioner.recordVertexModifications(verticesToRestart).values());
-
+		// 将重启节点添加到verticesWaitingForRestart集合中
 		addVerticesToRestartPending(verticesToRestart);
-
+		// 异步取消verticesWaitingForRestart对应的Task
 		final CompletableFuture<?> cancelFuture = cancelTasksAsync(verticesToRestart);
-
+		// 调用delayExecutor.schedule()方法启动调度和执行任务，并指定延迟执行时间
 		delayExecutor.schedule(
 			() -> FutureUtils.assertNoException(
 				cancelFuture.thenRunAsync(restartTasks(executionVertexVersions), getMainThreadExecutor())),
@@ -241,19 +247,21 @@ public class DefaultScheduler extends SchedulerBase implements SchedulerOperatio
 
 	private Runnable restartTasks(final Set<ExecutionVertexVersion> executionVertexVersions) {
 		return () -> {
+			// 获取ExecutionVertexID集合
 			final Set<ExecutionVertexID> verticesToRestart = executionVertexVersioner.getUnmodifiedExecutionVertices(executionVertexVersions);
-
+			// 从Pending的verticesWaitingForRestart集合中移除verticesToRestart
 			removeVerticesFromRestartPending(verticesToRestart);
-
+			// 将ExecutionVertexID对应的ExecutionVertex节点设定为可执行状态
 			resetForNewExecutions(verticesToRestart);
 
 			try {
+				// 恢复状态节点的状态数据
 				restoreState(verticesToRestart);
 			} catch (Throwable t) {
 				handleGlobalFailure(t);
 				return;
 			}
-
+			// 调度执行verticesToRestart对应的Execution节点集合
 			schedulingStrategy.restartTasks(verticesToRestart);
 		};
 	}

@@ -681,9 +681,11 @@ public class Task implements Runnable, TaskSlotPayload, TaskActions, PartitionPr
 			// Make sure the user code classloader is accessible thread-locally.
 			// We are setting the correct context class loader before instantiating the invokable
 			// so that it is available to the invokable during its entire lifetime.
+			// 将当前executingThread的ContextClassLoader设定为userCodeClassLoader，以确保能够正常访问用户代码
 			executingThread.setContextClassLoader(userCodeClassLoader);
 
 			// now load and instantiate the task's invokable code
+			// 加载并初始化Task中的invokeable代码，生成AbstractInvokable对象
 			invokable = loadAndInstantiateInvokable(userCodeClassLoader, nameOfInvokableClass, env);
 
 			// ----------------------------------------------------------------
@@ -692,20 +694,25 @@ public class Task implements Runnable, TaskSlotPayload, TaskActions, PartitionPr
 
 			// we must make strictly sure that the invokable is accessible to the cancel() call
 			// by the time we switched to running.
+			// 将invokable赋给成员变量，以便当Task状态转换为RUNNING时，能够在cancel()方法中获取invokable对象。
 			this.invokable = invokable;
 
 			// switch to the RUNNING state, if that fails, we have been canceled/failed in the meantime
+			// 将当前的Task执行状态从DEPLOYING转换为RUNNING，如果转换失败，则抛出异常
 			if (!transitionState(ExecutionState.DEPLOYING, ExecutionState.RUNNING)) {
 				throw new CancelTaskException();
 			}
 
 			// notify everyone that we switched to running
+			// 将Task ExecutionState状态转换为RUNNING的消息通过taskManagerActions通知给其他模块
 			taskManagerActions.updateTaskExecutionState(new TaskExecutionState(jobId, executionId, ExecutionState.RUNNING));
 
 			// make sure the user code classloader is accessible thread-locally
+			// 再次确认userCodeClassLoader已经设定为本地线程ContextClassLoader
 			executingThread.setContextClassLoader(userCodeClassLoader);
 
 			// run the invokable
+			// 执行invokable中的invoke()方法，从而执行逻辑Task中的计算任务
 			invokable.invoke();
 
 			// make sure, we enter the catch block if the task leaves the invoke() method due
