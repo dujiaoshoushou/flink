@@ -258,9 +258,26 @@ public class ExecutionGraphBuilder {
 		if (log.isDebugEnabled()) {
 			log.debug("Successfully created execution graph from job graph {} ({}).", jobName, jobId);
 		}
-
+		/**
+		 * 1. 根据snapshotSettings配置获取triggerVertices、ackVertices、confirmVertices节点集合，并转换对应的ExecutionJobVertex集合。其中triggerVertices集合
+		 *    存储了所有SourceOperator节点，这些节点通过CheckpointCoordinator主动触发Checkpoint操作。ackVertices和confirmVertices集合存储了StreamGraph中的全部
+		 *    节点，代表所有节点都需要返回Ack确认信息并确认Checkpoint执行成功。
+		 * 2. 创建CompletedCheckpointStore组件，用于存储Checkpoint过程中的元数据，当对作业进行恢复操作时会在CompletedCheckpointStore中检索最新完成的Checkpoint元
+		 *    数据信息，让后基于元数据信息恢复Checkpoint中存储的状态数据。CompletedCheckpointStore有两种实现，分别为ZooKeeperCompletedCheckpointStore和StandaloneCompletedCheckpointStore
+		 * 3. 在CompletedCheckpointStore中通过maxNumberOfCheckpointsToRetain参数配置以及结合checkpointIdCounter计数器保证只会存储固定数量的CompletedCheckpoint。
+		 * 4. 创建CheckpointStatsTracker实例，用于监控和追踪Checkpoint执行和更新的情况，包括Checkpoint执行的统计信息以及执行状况，WebUI中显示的Checkpoint监控数据主要
+		 *    来自CheckpointStatsTracker。
+		 * 5. 创建StateBackend，从UserClassLoader中反序列化出应用指定的StateBackend并设定为applicationConfiguredBackend。如果在应用中没有指定StateBackend，则调用
+		 *    StateBackendLoader.fromApplicationOrConfigOrDefault()方法从系统默认配置中加载StateBackend实现类。
+		 * 6. 初始化用户自定义的Checkpoint Hook函数，通过 snapshotSettings.getMasterHooks()方法获取SerializedValue<MasterTriggerRestoreHook.Factory[]>，并进行
+		 *    线程上下文切换，以保证在UserClassLoader中正确创建并加载MasterTriggerRestoreHook.Factory的实现类。
+		 * 7. 调用snapshotSettings.getCheckpointCoordinatorConfiguration()方法获取CheckpointCoordinatorConfiguration，最终调用executionGraph.enableCheckpointing()
+		 *    方法，在作业的执行和调度过程中开启Checkpoint。
+		 */
 		// configure the state checkpointing
+		// 从配置状态数据checkpointing，从jobGraph中获取JobCheckpointingSettings
 		JobCheckpointingSettings snapshotSettings = jobGraph.getCheckpointingSettings();
+		// 如果snapshotSettings不为null，则开启checkpoint功能呢
 		if (snapshotSettings != null) {
 			List<ExecutionJobVertex> triggerVertices =
 					idToVertex(snapshotSettings.getVerticesToTrigger(), executionGraph);
@@ -270,7 +287,7 @@ public class ExecutionGraphBuilder {
 
 			List<ExecutionJobVertex> confirmVertices =
 					idToVertex(snapshotSettings.getVerticesToConfirm(), executionGraph);
-
+			// 创建CompletedCheckpointStore
 			CompletedCheckpointStore completedCheckpoints;
 			CheckpointIDCounter checkpointIdCounter;
 			try {
@@ -287,17 +304,18 @@ public class ExecutionGraphBuilder {
 
 					maxNumberOfCheckpointsToRetain = CheckpointingOptions.MAX_RETAINED_CHECKPOINTS.defaultValue();
 				}
-
+				// 通过recoveryFactory创建CheckpointStore
 				completedCheckpoints = recoveryFactory.createCheckpointStore(jobId, maxNumberOfCheckpointsToRetain, classLoader);
+				// 通过recoveryFactory创建CheckpointIDCounter
 				checkpointIdCounter = recoveryFactory.createCheckpointIDCounter(jobId);
 			}
 			catch (Exception e) {
 				throw new JobExecutionException(jobId, "Failed to initialize high-availability checkpoint handler", e);
 			}
 
-			// Maximum number of remembered checkpoints
+			// Maximum number of remembered checkpoints 获取checkpoints最长的记录次数
 			int historySize = jobManagerConfig.getInteger(WebOptions.CHECKPOINTS_HISTORY_SIZE);
-
+			// 创建CheckpointStatsTracker实例
 			CheckpointStatsTracker checkpointStatsTracker = new CheckpointStatsTracker(
 					historySize,
 					ackVertices,
@@ -305,6 +323,7 @@ public class ExecutionGraphBuilder {
 					metrics);
 
 			// load the state backend from the application settings
+			// 从Application中获取StateBackend
 			final StateBackend applicationConfiguredBackend;
 			final SerializedValue<StateBackend> serializedAppConfigured = snapshotSettings.getDefaultStateBackend();
 
@@ -319,7 +338,7 @@ public class ExecutionGraphBuilder {
 							"Could not deserialize application-defined state backend.", e);
 				}
 			}
-
+			// 获取最终的rootBackend
 			final StateBackend rootBackend;
 			try {
 				rootBackend = StateBackendLoader.fromApplicationOrConfigOrDefault(
@@ -330,14 +349,15 @@ public class ExecutionGraphBuilder {
 			}
 
 			// instantiate the user-defined checkpoint hooks
-
+			// 初始化用户自定义的checkpoint Hooks函数
 			final SerializedValue<MasterTriggerRestoreHook.Factory[]> serializedHooks = snapshotSettings.getMasterHooks();
 			final List<MasterTriggerRestoreHook<?>> hooks;
-
+			// 如果serializedHooks为空，则hooks为空
 			if (serializedHooks == null) {
 				hooks = Collections.emptyList();
 			}
 			else {
+				// 加载MasterTriggerRestoreHook
 				final MasterTriggerRestoreHook.Factory[] hookFactories;
 				try {
 					hookFactories = serializedHooks.deserializeValue(classLoader);
@@ -345,24 +365,25 @@ public class ExecutionGraphBuilder {
 				catch (IOException | ClassNotFoundException e) {
 					throw new JobExecutionException(jobId, "Could not instantiate user-defined checkpoint hooks", e);
 				}
-
+				// 设定ClassLoader为UserClassLoader
 				final Thread thread = Thread.currentThread();
 				final ClassLoader originalClassLoader = thread.getContextClassLoader();
 				thread.setContextClassLoader(classLoader);
-
+				// 创建hooks函数
 				try {
 					hooks = new ArrayList<>(hookFactories.length);
 					for (MasterTriggerRestoreHook.Factory factory : hookFactories) {
 						hooks.add(MasterHooks.wrapHook(factory.create(), classLoader));
 					}
 				}
+				// 将thread的ContextClassLoader设定为originalClassLoader
 				finally {
 					thread.setContextClassLoader(originalClassLoader);
 				}
 			}
-
+			// 获取CheckpointCoordinatorConfiguration
 			final CheckpointCoordinatorConfiguration chkConfig = snapshotSettings.getCheckpointCoordinatorConfiguration();
-
+			// 开启executionGraph中的CheckPoint功能
 			executionGraph.enableCheckpointing(
 				chkConfig,
 				triggerVertices,

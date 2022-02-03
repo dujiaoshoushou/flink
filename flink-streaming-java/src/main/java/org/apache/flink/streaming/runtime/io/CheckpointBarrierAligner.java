@@ -101,14 +101,30 @@ public class CheckpointBarrierAligner extends CheckpointBarrierHandler {
 		return blockedChannels[channelIndex];
 	}
 
+	/**
+	 *
+	 * @param receivedBarrier
+	 * @param channelIndex
+	 * @param bufferedBytes
+	 * @return
+	 * @throws Exception
+	 * 1. 从receivedBarrier中获取barrierId，判断totalNumberOfInputChannels是否为1，如果InputChannel数量为1，则触发Checkpoint操作，不需要进行CheckpointBarrier事件，并进行Barrier对齐操作。
+	 * 2. 如果InputChannel数量不为1，则判断numBarriersReceived是否大于0，即是否已经开始接收CheckpointBarrier事件，并进行Barrier对齐操作。
+	 * 3. 如果barrierId == currentCheckpointId添加为True，则调用onBarrier()方法进行处理。
+	 * 4. 如果barrierId > currentCheckpointId,表明已经有新的Barrier事件发出，超过了当前端CheckpointId，这种情况就会忽略当前的Checkpoint，并调用beginNewAlignment()方法开启新的Checkpoint。
+	 * 5. 如果以上条件都不满足，表明当前的Checkpoint操作已经被取消或Barrier信息属于先前的checkpoint操作，此时直接返回false。
+	 * 6. 满足numBarriersReceived + numClosedChannels == totalNumberOfInputChannels条件后，触发该节点的Checkpoint操作。实际上会调用notifyCheckpoint()方法触发该Task实例Checkpoint操作。
+	 *
+	 */
 	@Override
 	public boolean processBarrier(CheckpointBarrier receivedBarrier, int channelIndex, long bufferedBytes) throws Exception {
+		// 首先获取barrierId
 		final long barrierId = receivedBarrier.getId();
-
+		// 如果InputChannels为1，直接触发Checkpoint操作，不需要对齐处理
 		// fast path for single channel cases
 		if (totalNumberOfInputChannels == 1) {
 			if (barrierId > currentCheckpointId) {
-				// new checkpoint
+				// new checkpoint 提交新的Checkpoint操作
 				currentCheckpointId = barrierId;
 				notifyCheckpoint(receivedBarrier, bufferedBytes, latestAlignmentDurationNanos);
 			}
@@ -121,7 +137,7 @@ public class CheckpointBarrierAligner extends CheckpointBarrierHandler {
 
 		if (numBarriersReceived > 0) {
 			// this is only true if some alignment is already progress and was not canceled
-
+			// 继续进行对齐操作
 			if (barrierId == currentCheckpointId) {
 				// regular case
 				onBarrier(channelIndex);
@@ -135,16 +151,19 @@ public class CheckpointBarrierAligner extends CheckpointBarrierHandler {
 					currentCheckpointId);
 
 				// let the task know we are not completing this
+				// 通知Task当前Checkpoint没有完成
 				notifyAbort(currentCheckpointId,
 					new CheckpointException(
 						"Barrier id: " + barrierId,
 						CheckpointFailureReason.CHECKPOINT_DECLINED_SUBSUMED));
 
 				// abort the current checkpoint
+				// 终止当前的Checkpoint操作
 				releaseBlocksAndResetBarriers();
 				checkpointAborted = true;
 
 				// begin a the new checkpoint
+				// 开启新的Checkpoint操作
 				beginNewAlignment(barrierId, channelIndex);
 			}
 			else {
@@ -154,6 +173,7 @@ public class CheckpointBarrierAligner extends CheckpointBarrierHandler {
 		}
 		else if (barrierId > currentCheckpointId) {
 			// first barrier of a new checkpoint
+			// 创建新的Checkpoint
 			beginNewAlignment(barrierId, channelIndex);
 		}
 		else {
@@ -164,6 +184,7 @@ public class CheckpointBarrierAligner extends CheckpointBarrierHandler {
 
 		// check if we have all barriers - since canceled checkpoints always have zero barriers
 		// this can only happen on a non canceled checkpoint
+		// 当Barrier接收的数量加上Channel关闭的数量等于整个InputChannels的数量时触发Checkpoint操作
 		if (numBarriersReceived + numClosedChannels == totalNumberOfInputChannels) {
 			// actually trigger checkpoint
 			if (LOG.isDebugEnabled()) {
@@ -172,8 +193,9 @@ public class CheckpointBarrierAligner extends CheckpointBarrierHandler {
 					receivedBarrier.getId(),
 					receivedBarrier.getTimestamp());
 			}
-
+			// 释放Block并重置Barrier
 			releaseBlocksAndResetBarriers();
+			// 开始触发CheckPoint操作
 			notifyCheckpoint(receivedBarrier, bufferedBytes, latestAlignmentDurationNanos);
 			return true;
 		}

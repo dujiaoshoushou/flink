@@ -261,6 +261,11 @@ public abstract class AbstractKeyedStateBackend<K> implements
 
 	/**
 	 * @see KeyedStateBackend
+	 * 1. 分别判断namespaceSerializer和keySerializer是否不为空。
+	 * 2. 从keyValueStatesByName集合中获取kvState，如果kvState为空，则调用TtlStateFactory创建新的kvState。
+	 * 3. 将新的kvState放置在keyValueStatesByName集合中，以便下次直接从该集合中获取kvState。
+	 * 4. 如果状态被设定为QueryableState,则需要调用publishQueryableStateIfEnabled()方法开启QueryableState功能。
+	 * 5. 返回已经创建的InternalKvState
 	 */
 	@Override
 	@SuppressWarnings("unchecked")
@@ -302,6 +307,10 @@ public abstract class AbstractKeyedStateBackend<K> implements
 	 *       state backend, or being set on the state directly.
 	 *
 	 * @see KeyedStateBackend
+	 * 1. 通过判断lastName是否与stateDescriptor中的名称一致，选择是否直接返回lastState。
+	 * 2. 通过keyValueStatesByName集合检查对应名称的KeyedState，检索到则直接返回keyValueStatesByName集合已经创建好的KeyedState。
+	 * 3. 如果在keyValueStatesByName集合中没有检索到相应的KeyedState，则调用getOrCreateKeyedState()方法创建新的KeyedState。
+	 * 4. 将创建好的KeyedState转为InternalKvState，同时将状态设定为lastState，最后设定kvState的CurrentNamespace并返回。
 	 */
 	@SuppressWarnings("unchecked")
 	@Override
@@ -311,12 +320,12 @@ public abstract class AbstractKeyedStateBackend<K> implements
 			final StateDescriptor<S, ?> stateDescriptor) throws Exception {
 
 		checkNotNull(namespace, "Namespace");
-
+		// 根据lastName是否与stateDescriptor中的名称一致，选择是否直接返回lastState
 		if (lastName != null && lastName.equals(stateDescriptor.getName())) {
 			lastState.setCurrentNamespace(namespace);
 			return (S) lastState;
 		}
-
+		// 通过keyValueStatesByName集合检索是否含有对应名称的State，如果有则返回状态
 		InternalKvState<K, ?, ?> previous = keyValueStatesByName.get(stateDescriptor.getName());
 		if (previous != null) {
 			lastState = previous;
@@ -324,12 +333,14 @@ public abstract class AbstractKeyedStateBackend<K> implements
 			lastName = stateDescriptor.getName();
 			return (S) previous;
 		}
-
+		// 获取或创建新的状态
 		final S state = getOrCreateKeyedState(namespaceSerializer, stateDescriptor);
+		// 将state转换为InternalKvState类型
 		final InternalKvState<K, N, ?> kvState = (InternalKvState<K, N, ?>) state;
 
 		lastName = stateDescriptor.getName();
 		lastState = kvState;
+		// 设定kvState的CurrentNamespace
 		kvState.setCurrentNamespace(namespace);
 
 		return state;

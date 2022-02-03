@@ -62,12 +62,14 @@ public class YarnSessionClusterEntrypoint extends SessionClusterEntrypoint {
 
 	public static void main(String[] args) {
 		// startup checks and logging
+		// 启动前检查并设定参数
 		EnvironmentInformation.logEnvironmentInfo(LOG, YarnSessionClusterEntrypoint.class.getSimpleName(), args);
 		SignalHandler.register(LOG);
+		// 安装safeguard shutdown hook
 		JvmShutdownSafeguard.installAsShutdownHook(LOG);
-
+		// 获取系统环境变量
 		Map<String, String> env = System.getenv();
-
+		// 获取工作路径
 		final String workingDirectory = env.get(ApplicationConstants.Environment.PWD.key());
 		Preconditions.checkArgument(
 			workingDirectory != null,
@@ -75,15 +77,16 @@ public class YarnSessionClusterEntrypoint extends SessionClusterEntrypoint {
 			ApplicationConstants.Environment.PWD.key());
 
 		try {
+			// 加载Yarn需要的环境信息
 			YarnEntrypointUtils.logYarnEnvironmentInformation(env, LOG);
 		} catch (IOException e) {
 			LOG.warn("Could not log YARN environment information.", e);
 		}
-
+		// 创建Configuration配置
 		Configuration configuration = YarnEntrypointUtils.loadConfiguration(workingDirectory, env);
-
+		// 创建YarnSessionClusterEntrypoint对象
 		YarnSessionClusterEntrypoint yarnSessionClusterEntrypoint = new YarnSessionClusterEntrypoint(configuration);
-
+		// 通过ClusterEntrypoint执行ClusterEntrypoint
 		ClusterEntrypoint.runClusterEntrypoint(yarnSessionClusterEntrypoint);
 	}
 }

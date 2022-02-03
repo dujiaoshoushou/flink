@@ -182,6 +182,12 @@ public class StateBackendLoader {
 	 *             backend in the factory
 	 * @throws IOException
 	 *             May be thrown by the StateBackendFactory when instantiating the state backend
+	 * 1. 在应用中创建的SateBackend会通过UserClassLoader提交到运行时中，此时可以直接从UserClassLoader中反序列化出StateBackend。
+	 *    如果应用配置的SateBackend不为空，则最高优先级是应用中定义的StateBackend实现类。
+	 * 2. 当应用中对StateBackend不为空时，判断fromApplication是否为ConfigurableStateBackend接口的实现类，如果是则将Config中的
+	 *    参数配置追加到fromApplication对应的StatBackend中。
+	 * 3. 当应用中没有创建StateBackend时，会调用loadStateBackendFromConfig()方法通过配置文件加载系统默认配置的StateBackend。
+	 * 4. 如果从系统默认配置中没有加载到StateBackend，即满足fromConfig==null条件，则创建默认基于内存实现的MemoryStateBackend。
 	 */
 	public static StateBackend fromApplicationOrConfigOrDefault(
 			@Nullable StateBackend fromApplication,
@@ -195,12 +201,14 @@ public class StateBackendLoader {
 		final StateBackend backend;
 
 		// (1) the application defined state backend has precedence
+		// 应用中已经定义了StateBackend
 		if (fromApplication != null) {
 			if (logger != null) {
 				logger.info("Using application-defined state backend: {}", fromApplication);
 			}
 
 			// see if this is supposed to pick up additional configuration parameters
+			// 向fromApplication中追加额外的参数配置
 			if (fromApplication instanceof ConfigurableStateBackend) {
 				// needs to pick up configuration
 				if (logger != null) {
@@ -216,12 +224,14 @@ public class StateBackendLoader {
 		}
 		else {
 			// (2) check if the config defines a state backend
+			// 检查是否开启了StateBackend默认配置
 			final StateBackend fromConfig = loadStateBackendFromConfig(config, classLoader, logger);
 			if (fromConfig != null) {
 				backend = fromConfig;
 			}
 			else {
 				// (3) use the default
+				// 创建默认MemoryStateBackend
 				backend = new MemoryStateBackendFactory().createFromConfig(config, classLoader);
 				if (logger != null) {
 					logger.info("No state backend has been configured, using default (Memory / JobManager) {}", backend);

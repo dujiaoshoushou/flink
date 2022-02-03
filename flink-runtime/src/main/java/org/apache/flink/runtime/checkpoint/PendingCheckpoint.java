@@ -257,6 +257,7 @@ public class PendingCheckpoint {
 		return onCompletionPromise;
 	}
 
+
 	public CompletedCheckpoint finalizeCheckpoint() throws IOException {
 
 		synchronized (lock) {

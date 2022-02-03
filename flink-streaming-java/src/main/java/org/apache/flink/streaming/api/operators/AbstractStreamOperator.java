@@ -261,18 +261,33 @@ public abstract class AbstractStreamOperator<OUT>
 		return metrics;
 	}
 
+	/**
+	 * 1. 从ExecutionConfig中获取KeySerializer序列化器。
+	 * 2. 获取当前Operator所属的StreamTask，然后调用StreamTask.createStreamTaskStateInitializer()方法创建StreamTaskSateManager实例。
+	 * 3. 调用StreamTaskStateManager.streamOperatorStateContext方法创建streamOperatorStateContext，在StreamOperatorStateContext中包含了
+	 *    创建KeyedState及OperatorState的状态存储后端环境信息。
+	 * 4. 从StreamOperatorStateContext中获取OperatorStateBackend实例，用于创建和管理OperatorState。
+	 * 5. 从StreamOperatorStateContext中获取KeyedStateBackend,用于创建和管理KeyedState.
+	 * 6. 从StreamOperatorStateContext中获取TimeServiceManager实例，用于在当前算子中注册和管理定时器。
+	 * 7. 从StreamOperatorStateContext中获取keyedStateInputs和OperatorStateInputs。keyedStateInputs和OperatorStateInputs分别提供了创建和获取
+	 *    KeyedState和OperatorState的原生方法。
+	 * 8. 基于以上信息创建StateInitializationContext对象，包含OperatorStateBackend和keyedStateBackend状态管理器以及原生状态管理使用的KeyedStateInputs
+	 *    和 OperatorStateInputs管理器。
+	 * 9. 调用initializeState()方法初始化算子中的状态数据，initializeState()方法主要由AbstractStreamOperator的子类实现，例如AbstractUdfStreamOperator.
+	 */
 	@Override
 	public final void initializeState() throws Exception {
-
+		// 获取TypeSerializer类型的序列化器
 		final TypeSerializer<?> keySerializer = config.getStateKeySerializer(getUserCodeClassloader());
-
+		// 获取当前Operator所在的StreamTask
 		final StreamTask<?, ?> containingTask =
 			Preconditions.checkNotNull(getContainingTask());
 		final CloseableRegistry streamTaskCloseableRegistry =
 			Preconditions.checkNotNull(containingTask.getCancelables());
+		// 创建StreamTaskStateInitializer实例
 		final StreamTaskStateInitializer streamTaskStateManager =
 			Preconditions.checkNotNull(containingTask.createStreamTaskStateInitializer());
-
+		// 创建StreamOperatorStateContext
 		final StreamOperatorStateContext context =
 			streamTaskStateManager.streamOperatorStateContext(
 				getOperatorID(),
@@ -282,27 +297,29 @@ public abstract class AbstractStreamOperator<OUT>
 				keySerializer,
 				streamTaskCloseableRegistry,
 				metrics);
-
+		// 通过StreamOperatorStateContext获取operatorStateBackend
 		this.operatorStateBackend = context.operatorStateBackend();
+		// 获取keyedStateBackend
 		this.keyedStateBackend = context.keyedStateBackend();
-
+		// 如果获取keyedStateBackend不为空，则通过keyedStateBackend创建DefaultKeyedStateStore
 		if (keyedStateBackend != null) {
 			this.keyedStateStore = new DefaultKeyedStateStore(keyedStateBackend, getExecutionConfig());
 		}
-
+		// 初始化TimeServiceManager
 		timeServiceManager = context.internalTimerServiceManager();
-
+		// 分别创建keyedStateInputs和operatorStateInputs
 		CloseableIterable<KeyGroupStatePartitionStreamProvider> keyedStateInputs = context.rawKeyedStateInputs();
 		CloseableIterable<StatePartitionStreamProvider> operatorStateInputs = context.rawOperatorStateInputs();
 
 		try {
+			// 创建StateInitializationContext上下文
 			StateInitializationContext initializationContext = new StateInitializationContextImpl(
-				context.isRestored(), // information whether we restore or start for the first time
+				context.isRestored(), // 表示当前Context是经过重启恢复的还是第一次启动创建的 information whether we restore or start for the first time
 				operatorStateBackend, // access to operator state backend
 				keyedStateStore, // access to keyed state backend
 				keyedStateInputs, // access to keyed state stream
 				operatorStateInputs); // access to operator state stream
-
+			// 调用initializeState()方法初始化状态
 			initializeState(initializationContext);
 		} finally {
 			closeFromRegistry(operatorStateInputs, streamTaskCloseableRegistry);
@@ -404,15 +421,26 @@ public abstract class AbstractStreamOperator<OUT>
 		// this is purely for subclasses to override
 	}
 
+	/**
+	 * 1. 如果keyedStateBackend为空，获取keyGroupRange。
+	 * 2. 创建OperatorSnapshotFutures对象，封装当前算子对应的状态快照操作。
+	 * 3. 创建snapshotContext上下文对象，存储快照过程中需要的上下文信息，并调用snapshotState()方法执行快照操作。snapshotState()方法由StreamOperator子类实现，
+	 *    例如在AbstractUdfStreamOperator中会调用StreamingFunctionUtils.snapshotFunctionState(context,getOperatorStateBackend(),userFunction)
+	 *    方法执行函数中的状态快照操作。
+	 * 4. 向snapshotInProgress中指定KeyedStateRawFuture和OperatorStateRawFuture，专门处理原生状态数据的快照操作。
+	 * 5. 如果operatorStateBackend不为空，则将operatorStateBackend.snapshot()方法块设定到OperatorStateManagedFuture中，并注册到snapshotInProgress中等待执行。
+	 * 6. 如果keyedStateBackend不为空，则将keyedStateBackend.snapshot()方法块设定到KeyedStateManagedFuture中，并注册到snapshotInProgress中等待执行。
+	 * 7. 返回创建的snapshotInProgress异步Future对象，snapshotInProgress中封装了当前算子需要执行的所有快照操作。
+	 */
 	@Override
 	public final OperatorSnapshotFutures snapshotState(long checkpointId, long timestamp, CheckpointOptions checkpointOptions,
 			CheckpointStreamFactory factory) throws Exception {
-
+		// 获取KeyGroupRange
 		KeyGroupRange keyGroupRange = null != keyedStateBackend ?
 				keyedStateBackend.getKeyGroupRange() : KeyGroupRange.EMPTY_KEY_GROUP_RANGE;
-
+		// 创建OperatorSnapshotFutures处理对象
 		OperatorSnapshotFutures snapshotInProgress = new OperatorSnapshotFutures();
-
+		// 创建snapshotContext上下文对象
 		StateSnapshotContextSynchronousImpl snapshotContext = new StateSnapshotContextSynchronousImpl(
 			checkpointId,
 			timestamp,
@@ -422,15 +450,15 @@ public abstract class AbstractStreamOperator<OUT>
 
 		try {
 			snapshotState(snapshotContext);
-
+			// 设定KeyedStateRawFuture和OperatorStateRawFuture
 			snapshotInProgress.setKeyedStateRawFuture(snapshotContext.getKeyedStateStreamFuture());
 			snapshotInProgress.setOperatorStateRawFuture(snapshotContext.getOperatorStateStreamFuture());
-
+			// 如果operatorStateBackend 不为空，设定OperatorStateManagedFuture
 			if (null != operatorStateBackend) {
 				snapshotInProgress.setOperatorStateManagedFuture(
 					operatorStateBackend.snapshot(checkpointId, timestamp, factory, checkpointOptions));
 			}
-
+			// 如果keyedStateBackend不为空，设定KeyedStateManagedFuture
 			if (null != keyedStateBackend) {
 				snapshotInProgress.setKeyedStateManagedFuture(
 					keyedStateBackend.snapshot(checkpointId, timestamp, factory, checkpointOptions));

@@ -43,13 +43,15 @@ public class KubernetesSessionClusterEntrypoint extends SessionClusterEntrypoint
 	}
 
 	public static void main(String[] args) {
-		// startup checks and logging
+		// startup checks and logging 启动检查和日志设定
 		EnvironmentInformation.logEnvironmentInfo(LOG, KubernetesSessionClusterEntrypoint.class.getSimpleName(), args);
 		SignalHandler.register(LOG);
+		// 注册ShutdownHook
 		JvmShutdownSafeguard.installAsShutdownHook(LOG);
-
+		// 创建KubernetesSessionClusterEntrypoint
 		final ClusterEntrypoint entrypoint = new KubernetesSessionClusterEntrypoint(
 			KubernetesEntrypointUtils.loadConfiguration());
+		// 通过ClusterEntrypoint启动当前EntryPoint
 		ClusterEntrypoint.runClusterEntrypoint(entrypoint);
 	}
 }

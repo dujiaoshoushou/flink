@@ -515,7 +515,7 @@ public class FlinkYarnSessionCli extends AbstractCustomCommandLine {
 	public int run(String[] args) throws CliArgsException, FlinkException {
 		//
 		//	Command Line Options
-		//
+		//  解析CommandLine命令行，通过CommandLine解析Configuration参数
 		final CommandLine cmd = parseCommandLineOptions(args, true);
 
 		if (cmd.hasOption(help.getOpt())) {
@@ -524,31 +524,37 @@ public class FlinkYarnSessionCli extends AbstractCustomCommandLine {
 		}
 
 		final Configuration configuration = applyCommandLineOptionsToConfiguration(cmd);
+		// 通过clusterClientServiceLoader加载ClusterClientFactory，这里加载的ClusterClientFactory实现类为YarnClusterClientFactory,
+		// 通过ClusterClientFactory创建YarnClusterDescriptor实例
 		final ClusterClientFactory<ApplicationId> yarnClusterClientFactory = clusterClientServiceLoader.getClusterClientFactory(configuration);
 
 		final YarnClusterDescriptor yarnClusterDescriptor = (YarnClusterDescriptor) yarnClusterClientFactory.createClusterDescriptor(configuration);
 
 		try {
 			// Query cluster for metrics
+
 			if (cmd.hasOption(query.getOpt())) {
 				final String description = yarnClusterDescriptor.getClusterDescription();
 				System.out.println(description);
 				return 0;
 			} else {
+
 				final ClusterClientProvider<ApplicationId> clusterClientProvider;
 				final ApplicationId yarnApplicationId;
-
+                // 如果指定了applicationId，则连接集群获取客户端
 				if (cmd.hasOption(applicationId.getOpt())) {
 					yarnApplicationId = ConverterUtils.toApplicationId(cmd.getOptionValue(applicationId.getOpt()));
 
 					clusterClientProvider = yarnClusterDescriptor.retrieve(yarnApplicationId);
 				} else {
+					// 否则创建新的集群，并返回客户端
 					final ClusterSpecification clusterSpecification = yarnClusterClientFactory.getClusterSpecification(configuration);
-
+					// TODO 这里是重点，调用yarnClusterDescriptor.deploySessionCluster(clusterSpecification)方法创建新的Session集群
 					clusterClientProvider = yarnClusterDescriptor.deploySessionCluster(clusterSpecification);
 					ClusterClient<ApplicationId> clusterClient = clusterClientProvider.getClusterClient();
 
 					//------------------ ClusterClient deployed, handle connection details
+					// 获取yarnApplicationId
 					yarnApplicationId = clusterClient.getClusterId();
 
 					try {
@@ -573,16 +579,18 @@ public class FlinkYarnSessionCli extends AbstractCustomCommandLine {
 						throw new FlinkException("Could not write the Yarn connection information.", e);
 					}
 				}
-
+				// 如果启动模式为ATTACHED，则直接打印集群信息
 				if (!configuration.getBoolean(DeploymentOptions.ATTACHED)) {
 					YarnClusterDescriptor.logDetachedClusterInformation(yarnApplicationId, LOG);
 				} else {
+					// 否则启动ScheduledExecutorService
 					ScheduledExecutorService scheduledExecutorService = Executors.newSingleThreadScheduledExecutor();
 
 					final YarnApplicationStatusMonitor yarnApplicationStatusMonitor = new YarnApplicationStatusMonitor(
 						yarnClusterDescriptor.getYarnClient(),
 						yarnApplicationId,
 						new ScheduledExecutorServiceAdapter(scheduledExecutorService));
+					// 增加shutdownHook操作，确保进程结束后集群可以正常关闭
 					Thread shutdownHook = ShutdownHookUtil.addShutdownHook(
 						() -> shutdownCluster(
 								clusterClientProvider.getClusterClient(),
@@ -591,6 +599,7 @@ public class FlinkYarnSessionCli extends AbstractCustomCommandLine {
 								getClass().getSimpleName(),
 								LOG);
 					try {
+						// 同时启动交互命令行
 						runInteractiveCli(
 							yarnApplicationStatusMonitor,
 							acceptInteractiveInput);

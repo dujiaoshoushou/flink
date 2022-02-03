@@ -146,18 +146,32 @@ public class KubernetesClusterDescriptor implements ClusterDescriptor<String> {
 		throw new ClusterDeploymentException("Per job could not be supported now.");
 	}
 
+	/**
+	 * 1. 设定ClusterEntrypoint的ExecutionMode为DETACHED或NORMAL类型。
+	 * 2. 设定集群启动需要的入口类名称，这里的Entropoint实际上就是KubernetesSessionClusterEntrypoint。
+	 * 3. 检查RPC服务的默认端口是否需要更新，如果用户配置了新的端口则需要对原有配置进行更新。
+	 * 4. 检查集群高可用配置，如果集群开启高可用模式，则检查高可用的端段等配置信息。
+	 * 5. 基于FlinkCubeClient创建KubernetesService服务，使用KubernetesService获取ServiceI，并设定到flinkConfig配置中。
+	 *    ServiceID主要用于回收后面的集群资源。
+	 * 6. 调用client.createRestService()方法创建Session集群对外提供服务的Rest Service。
+	 * 7. 调用client.createConfigMap()方法创建ConfigMap资源对象，存储flink-conf.yaml等配置文件。
+	 * 8. 调用client.createFlinkMasterDeployment()方法，创建和启动Flink集群管理节点。
+	 * 9. 通过ClusterID创建ClusterClientProvider实现类，通过ClusterClientProvier获取与集群通信的ClusterClient
+	 */
 	private ClusterClientProvider<String> deployClusterInternal(
 			String entryPoint,
 			ClusterSpecification clusterSpecification,
 			boolean detached) throws ClusterDeploymentException {
+		// 设定集群的启动模式为DETACHED或者NORMAL
 		final ClusterEntrypoint.ExecutionMode executionMode = detached ?
 			ClusterEntrypoint.ExecutionMode.DETACHED
 			: ClusterEntrypoint.ExecutionMode.NORMAL;
 		flinkConfig.setString(ClusterEntrypoint.EXECUTION_MODE, executionMode.toString());
-
+		// 设定集群启动EntryPoint类名
 		flinkConfig.setString(KubernetesConfigOptionsInternal.ENTRY_POINT_CLASS, entryPoint);
 
 		// Rpc, blob, rest, taskManagerRpc ports need to be exposed, so update them to fixed values.
+		// 检查和更新RPC服务端口
 		KubernetesUtils.checkAndUpdatePortConfigOption(flinkConfig, BlobServerOptions.PORT, Constants.BLOB_SERVER_PORT);
 		KubernetesUtils.checkAndUpdatePortConfigOption(
 			flinkConfig,
@@ -167,7 +181,7 @@ public class KubernetesClusterDescriptor implements ClusterDescriptor<String> {
 		// Set jobmanager address to namespaced service name
 		final String nameSpace = flinkConfig.getString(KubernetesConfigOptions.NAMESPACE);
 		flinkConfig.setString(JobManagerOptions.ADDRESS, clusterId + "." + nameSpace);
-
+		// 集群高可用配置
 		if (HighAvailabilityMode.isHighAvailabilityModeActivated(flinkConfig)) {
 			flinkConfig.setString(HighAvailabilityOptions.HA_CLUSTER_ID, clusterId);
 			KubernetesUtils.checkAndUpdatePortConfigOption(
@@ -177,6 +191,7 @@ public class KubernetesClusterDescriptor implements ClusterDescriptor<String> {
 		}
 
 		try {
+			// 设定ServiceI，用于集群资源回收GC操作
 			final KubernetesService internalSvc = client.createInternalService(clusterId).get();
 			// Update the service id in Flink config, it will be used for gc.
 			final String serviceId = internalSvc.getInternalResource().getMetadata().getUid();
@@ -187,14 +202,16 @@ public class KubernetesClusterDescriptor implements ClusterDescriptor<String> {
 			}
 
 			// Create the rest service when exposed type is not ClusterIp.
+			// 创建对外提供服务的Rest Service
 			final String restSvcExposedType = flinkConfig.getString(KubernetesConfigOptions.REST_SERVICE_EXPOSED_TYPE);
 			if (!restSvcExposedType.equals(KubernetesConfigOptions.ServiceExposedType.ClusterIP.toString())) {
 				client.createRestService(clusterId).get();
 			}
-
+			// 创建ConfigMap
 			client.createConfigMap();
+			// 创建和启动Flink集群
 			client.createFlinkMasterDeployment(clusterSpecification);
-
+			// 返回 ClusterClient，用于和集群通信
 			return createClusterClientProvider(clusterId);
 		} catch (Exception e) {
 			client.handleException(e);

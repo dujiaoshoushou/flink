@@ -815,6 +815,10 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 			checkpointOptions);
 	}
 
+	/**
+	 * 1. 调用StreamTask.performCheckpoint()方法执行Checkpoint并返回success信息，用于判断Checkpoint操作是否成功执行。
+	 * 2. 如果success为false，表明Checkpoint操作没有成功执行，此时调用declineCheckpoint()方法回退。
+	 */
 	private boolean triggerCheckpoint(
 			CheckpointMetaData checkpointMetaData,
 			CheckpointOptions checkpointOptions,
@@ -880,6 +884,20 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 		actionExecutor.runThrowing(() -> operatorChain.broadcastCheckpointCancelMarker(checkpointId));
 	}
 
+	/**
+	 * 执行检查点函数
+	 * @param checkpointMetaData
+	 * @param checkpointOptions
+	 * @param checkpointMetrics
+	 * @param advanceToEndOfTime
+	 * @return
+	 * @throws Exception
+	 * 1. 首先是Checkpoint执行前的准备操作，即调用operatorChain.prepareSnapshotPreBarrier(checkpointId)方法，让OperatorChain中所有的Operator执行Pre-barrier工作。
+	 * 2. 将CheckpointBarrier事件发送到下游节点中。
+	 * 3. 执行checkpointState()方法，对StreamTask中OperatorChain的所有算子进行状态数据的快照操作，该过程为异步非阻塞过程，不影响数据的正常处理进程，执行完成后会返回True到CheckpointInputGate中。
+	 * 4. 如果isRunning的条件为false，表明Task不在运行状态，此时需要OperatorChain中所有算子发送CancelCheckpointMarker信息，这里主要借助recordWriter.broadcastEvent(message)方法向下游算子进行事件广播。
+	 * 5. 当且仅当OperatorChain中的算子还没有执行完Checkpoint操作的时候，下游算子接收到ChancelCheckpointMarker信息后会立即取消Checkpoint操作。
+	 */
 	private boolean performCheckpoint(
 			CheckpointMetaData checkpointMetaData,
 			CheckpointOptions checkpointOptions,
@@ -892,6 +910,7 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 		final long checkpointId = checkpointMetaData.getCheckpointId();
 
 		if (isRunning) {
+			// 使用actionExecutor执行Checkpoint逻辑
 			actionExecutor.runThrowing(() -> {
 
 				if (checkpointOptions.getCheckpointType().isSynchronous()) {
@@ -909,9 +928,11 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 
 				// Step (1): Prepare the checkpoint, allow operators to do some pre-barrier work.
 				//           The pre-barrier work should be nothing or minimal in the common case.
+				// Checkpoint操作的准备工作
 				operatorChain.prepareSnapshotPreBarrier(checkpointId);
 
 				// Step (2): Send the checkpoint barrier downstream
+				// 将Checkpoint barrier发送到下游的stream中
 				operatorChain.broadcastCheckpointBarrier(
 						checkpointId,
 						checkpointMetaData.getTimestamp(),
@@ -919,12 +940,14 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 
 				// Step (3): Take the state snapshot. This should be largely asynchronous, to not
 				//           impact progress of the streaming topology
+				// 对算子中的状态进行快照操作，此步骤时异步操作，不影响streaming拓扑中数据的正常处理
 				checkpointState(checkpointMetaData, checkpointOptions, checkpointMetrics);
 
 			});
 
 			return true;
 		} else {
+			// 如果Task处于其他状态，则向下游广播CancelCheckpointMarker消息
 			actionExecutor.runThrowing(() -> {
 				// we cannot perform our checkpoint - let the downstream operators know that they
 				// should not wait for any input from this operator
@@ -960,6 +983,12 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 				"checkpoint %d complete", checkpointId);
 	}
 
+	/**
+	 * 1. 获取当前Task中算子链的算子，并调用operator.notifyCheckpointComplete(checkpointId)方法发送Checkpoint完成的信息。
+	 * 2. 获取TaskStateManager对象，向其通知Checkpoint完成消息，这里主要调用TaskLocalStateStore清理本地无用的Checkpoint数据。
+	 * 3. 如果当前Checkpoint是同步的Savepoint操作，直接完成并终止当前Task实例，并调用resetSynchronousSavepointId()方法将syncSavepointId置空。
+	 * @param checkpointId
+	 */
 	private void notifyCheckpointComplete(long checkpointId) {
 		try {
 			boolean success = actionExecutor.call(() -> {
@@ -1007,22 +1036,34 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 		}
 	}
 
+	/**
+	 *
+	 * @param checkpointMetaData
+	 * @param checkpointOptions
+	 * @param checkpointMetrics
+	 * @throws Exception
+	 * 1. 通过checkpointStorage创建CheckpointStreamFactory实例，进一步创建CheckpointStateOutputStream实例。CheckpointStateOutputStream主要有
+	 *    FsCheckpointStateOutputStream和MemoryCheckpointOutputStream两种实现类，分别对应文件类型系统和内存的数据流数仓。
+	 * 2. 创建CheckpointingOperation实例，CheckpointingOperation封装了Checkpoint指向的具体操作流程，已经checkpointMetaData、checkpointOptions、
+	 *    storage和CheckpointMetrics等Checkpoint执行过程中需要的环境配置信息。
+	 * 3. 调用CheckpointingOperation.executeCheckpointing()方法执行Checkpoint操作。
+	 */
 	private void checkpointState(
 			CheckpointMetaData checkpointMetaData,
 			CheckpointOptions checkpointOptions,
 			CheckpointMetrics checkpointMetrics) throws Exception {
-
+		// 创建CheckpointStreamFactory实例
 		CheckpointStreamFactory storage = checkpointStorage.resolveCheckpointStorageLocation(
 				checkpointMetaData.getCheckpointId(),
 				checkpointOptions.getTargetLocation());
-
+		// 创建CheckpointingOperation实例
 		CheckpointingOperation checkpointingOperation = new CheckpointingOperation(
 			this,
 			checkpointMetaData,
 			checkpointOptions,
 			storage,
 			checkpointMetrics);
-
+		// 执行Checkpoint操作。
 		checkpointingOperation.executeCheckpointing();
 	}
 
@@ -1158,6 +1199,17 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 			this.asyncStartNanos = asyncStartNanos;
 		}
 
+		/**
+		 * 1. 调用FileSystemSafetyNet.initializeSafetyNetForThread()方法为当前线程初始化文件系统安全网，确保数据能够正常写入。
+		 * 2. 创建jobManagerTaskOperatorSubtaskStates和localTaskOperatorSubtaskStates对应的TaskStateSnapshot实例，其中jobManagerTaskOperatorSubtaskStates
+		 *    用于存储和记录发送给JobManager的Checkpoint数据，localTaskOperatorSubtaskStates用于存储TaskExecutor本地的状态数据。
+		 * 3. 遍历operatorSnapshotsInProgress集合，获取OperatorSnapshotFutures并创建OperatorSnapshotFinalizer实例，用于执行所有状态快照线程操作。
+		 *    在OperatorSnapshotFinalizer中会调用FutureUtils.runIfNotDoneAndGet()方法执行KeyedState和OperatorState的快照操作。
+		 * 4. 从finalizedSnapshots中获取JobManagerOwnedState和TaskLocalState，分别存储在jobManagerTaskOperatorSubtaskStates和localTaskOperatorSubtaskStates集合中。
+		 * 5. 调用checkpointMetrics对象记录Checkpoint的执行时间并汇总到Metric监控系统中。
+		 * 6. 如果AsyncCheckpointState为COMPLETED状态，则调用reportCompletedSnapshotStates()方法向JobManager汇报Checkpoint的执行结果。
+		 * 7. 如果出现其他异常情况，则调用handleExecutionException()方法进行处理。
+		 */
 		@Override
 		public void run() {
 			FileSystemSafetyNet.initializeSafetyNetForThread();
@@ -1381,6 +1433,15 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 			this.operatorSnapshotsInProgress = new HashMap<>(allOperators.length);
 		}
 
+		/**
+		 * 1. 遍历所有StreamOperator算子，然后调用checkpointStreamOperator()方法，为每个算子创建OperatorSnapshotFutures对象。这一步实际调用了
+		 *    算子中的StreamOperator.snapshotState()方法，将所有算子的快照操作存储在OperatorSnapshotFutures集合中。
+		 * 2. 将OperatorSnapshotFutures存储到operatorSnapshotsInProgress的键值对集合中，其中的Key为OperatorID，Value为该算子执行状态快照操作对应的
+		 *    OperatorSnapshotFutures对象
+		 * 3. 创建AsyncCheckpointRunnable线程对象，AsyncCheckpointRunnable实例中包含了创建好的OperatorSnapshotFutures集合。
+		 * 4. 调用asyncOperationsThreadPool线程池执行AsyncCheckpointRunnable线程，在AsyncCheckpointRunnable线程中执行operatorSnapshotsInProgress
+		 *    集合中算子的异步快照操作。
+		 */
 		public void executeCheckpointing() throws Exception {
 			startSyncPartNano = System.nanoTime();
 

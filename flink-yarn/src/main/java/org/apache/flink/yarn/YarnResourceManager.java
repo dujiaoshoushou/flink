@@ -172,10 +172,11 @@ public class YarnResourceManager extends ActiveResourceManager<YarnWorkerNode>
 			YarnConfiguration yarnConfiguration,
 			int yarnHeartbeatIntervalMillis,
 			@Nullable String webInterfaceUrl) throws Exception {
+		// 创建resourceManagerClient
 		AMRMClientAsync<AMRMClient.ContainerRequest> resourceManagerClient = AMRMClientAsync.createAMRMClientAsync(
 			yarnHeartbeatIntervalMillis,
 			this);
-
+		// 初始化并启动resourceManagerClient
 		resourceManagerClient.init(yarnConfiguration);
 		resourceManagerClient.start();
 
@@ -195,9 +196,10 @@ public class YarnResourceManager extends ActiveResourceManager<YarnWorkerNode>
 		} else {
 			restPort = -1;
 		}
-
+		// 向资源管理注册ApplicationMaster的节点信息
 		final RegisterApplicationMasterResponse registerApplicationMasterResponse =
 			resourceManagerClient.registerApplicationMaster(hostPort.f0, restPort, webInterfaceUrl);
+		// 获取申请的Container资源
 		getContainersFromPreviousAttempts(registerApplicationMasterResponse);
 
 		return resourceManagerClient;
@@ -216,6 +218,7 @@ public class YarnResourceManager extends ActiveResourceManager<YarnWorkerNode>
 
 	protected NMClientAsync createAndStartNodeManagerClient(YarnConfiguration yarnConfiguration) {
 		// create the client to communicate with the node managers
+		// 创建与NodeManager进行通信的客户端
 		NMClientAsync nodeManagerClient = NMClientAsync.createNMClientAsync(this);
 		nodeManagerClient.init(yarnConfiguration);
 		nodeManagerClient.start();
@@ -230,6 +233,7 @@ public class YarnResourceManager extends ActiveResourceManager<YarnWorkerNode>
 	@Override
 	protected void initialize() throws ResourceManagerException {
 		try {
+			// 连接Yarn ResourceManager 客户端
 			resourceManagerClient = createAndStartResourceManagerClient(
 				yarnConfig,
 				yarnHeartbeatIntervalMillis,
@@ -237,7 +241,7 @@ public class YarnResourceManager extends ActiveResourceManager<YarnWorkerNode>
 		} catch (Exception e) {
 			throw new ResourceManagerException("Could not start resource manager client.", e);
 		}
-
+		// 连接Yarn  NodeManager 客户端
 		nodeManagerClient = createAndStartNodeManagerClient(yarnConfig);
 	}
 
@@ -346,33 +350,54 @@ public class YarnResourceManager extends ActiveResourceManager<YarnWorkerNode>
 		);
 	}
 
+	/**
+	 * 1. 获取pendingResources，根据申请到的Container数量和numPendingContainerRequests最小值，决定Container的启动数量。
+	 * 2. 获取numAcceptedContainers集合，即接受的Container数量并求取requiredContainers集合，即需要使用到的Container资源数量。
+	 * 3. 多余的Container资源会存储在excessContainer集合中，用于Container资源的会回收和释放。
+	 * 4. 在多个PendingRequest集合中删除已经申请到的Container资源的PendingContainerRequest
+	 * 5. 调用returnExcessContainer()方法，将excessContainer集合中多余的Container资源返回给Yarn RM
+	 * 6. 不需要申请Container资源时仅会和RM之间建立心跳连接。
+	 */
 	@Override
 	public void onContainersAllocated(List<Container> containers) {
 		runAsync(() -> {
 			log.info("Received {} containers with {} pending container requests.", containers.size(), numPendingContainerRequests);
+			// 获取pendingRequests集合
 			final Collection<AMRMClient.ContainerRequest> pendingRequests = getPendingRequests();
 			final Iterator<AMRMClient.ContainerRequest> pendingRequestsIterator = pendingRequests.iterator();
 
 			// number of allocated containers can be larger than the number of pending container requests
+			// 获取接收的Container数量
 			final int numAcceptedContainers = Math.min(containers.size(), numPendingContainerRequests);
+			// 获取需要的Container集合
 			final List<Container> requiredContainers = containers.subList(0, numAcceptedContainers);
+			// 将多余的资源存储在excessContainers中
 			final List<Container> excessContainers = containers.subList(numAcceptedContainers, containers.size());
-
+			// 删除pendingContainerRequests
 			for (int i = 0; i < requiredContainers.size(); i++) {
 				removeContainerRequest(pendingRequestsIterator.next());
 			}
-
+			// 返回不需要的Container给yarn
 			excessContainers.forEach(this::returnExcessContainer);
+			// 根据接收到的Container启动TaskExecutor实例
 			requiredContainers.forEach(this::startTaskExecutorInContainer);
 
 			// if we are waiting for no further containers, we can go to the
 			// regular heartbeat interval
+			// 如果不需要申请Container资源，则只需要和RM之间建立心跳连接。
 			if (numPendingContainerRequests <= 0) {
 				resourceManagerClient.setHeartbeatInterval(yarnHeartbeatIntervalMillis);
 			}
 		});
 	}
 
+	/**
+	 * 1. 为每个TaskManager创建ResourceID，通过ResourceID标识TaskManager资源实例。
+	 * 2. 在workerNodeMap中注册新申请的YarnWorkerNode，由YarnWorkerNode对Container进行封装。
+	 * 3. 调用createTaskExecutorLaunchContext()方法，创建启动TaskExecutor的Context上下文信息。
+	 * 4.调用nodeManagerClient.startContainerAsync()方法，启动TaskExecutor对应的Container资源容器。
+	 * 5. 如果启动过程中出现任何异常，则需要是否Container资源。
+	 */
 	private void startTaskExecutorInContainer(Container container) {
 		final String containerIdStr = container.getId().toString();
 		final ResourceID resourceId = new ResourceID(containerIdStr);
@@ -381,6 +406,7 @@ public class YarnResourceManager extends ActiveResourceManager<YarnWorkerNode>
 
 		try {
 			// Context information used to start a TaskExecutor Java process
+			// 创建启动TaskExecutor进程需要的上下文
 			ContainerLaunchContext taskExecutorLaunchContext = createTaskExecutorLaunchContext(
 				containerIdStr,
 				container.getNodeId().getHost());

@@ -96,6 +96,26 @@ public class StreamTaskStateInitializerImpl implements StreamTaskStateInitialize
 
 	// -----------------------------------------------------------------------------------------------------------------
 
+	/**
+	 *
+	 * @param operatorID the id of the operator for which the context is created. Cannot be null.
+	 * @param operatorClassName the classname of the operator instance for which the context is created. Cannot be null.
+	 * @param processingTimeService
+	 * @param keyContext the key context of the operator instance for which the context is created Cannot be null.
+	 * @param keySerializer the key-serializer for the operator. Can be null.
+	 * @param streamTaskCloseableRegistry the closeable registry to which created closeable objects will be registered.
+	 * @param metricGroup the parent metric group for all statebackend metrics
+	 * @return
+	 * @throws Exception
+	 * 1. 从environment中获取TaskInfo，并基于Task实例创建OperatorSubtaskDescriptionText。Operator中Task实例的描述信息包含OperatorID、
+	 *    OperatorClassName等，最终用于创建OperatorStateBackend的状态存储后端。
+	 * 2. 调用keyedStateBackend()方法创建KeyedStateBackend、KeyedStateBackend是KeyedState的状态管理后端，提供创建和管理KeyedState的方法。
+	 * 3. 调用operatorStateBackend()方法创建OperatorStateBackend，OperatorStateBackend是OperatorState的状态管理后端，提供获取和管理OpeatorState的接口。
+	 * 4. 调用rawKeyedStateInputs()方法创建KeyGroupStatePartitionStreamProvider实例，该实例提供创建和获取原生KeyedState的方法。
+	 * 5. 调用rawOperatorStateInputs()方法创建StatePartitionStreamProvider实例，该实例提供创建和获取原生OperatorState的方法。
+	 * 6. 将所有创建出来的托管状态管理后端keyedStateBackend和OperatorStateBackend、原生状态存储后端rawKeyedStateInputs和rawOperatorStateInputs
+	 *    及timeServiceManager实例，全部封装在StreamOperatorStateContextImpl上下文对象中，并返回给AbstractStreamOperator使用。
+	 */
 	@Override
 	public StreamOperatorStateContext streamOperatorStateContext(
 		@Nonnull OperatorID operatorID,
@@ -105,7 +125,7 @@ public class StreamTaskStateInitializerImpl implements StreamTaskStateInitialize
 		@Nullable TypeSerializer<?> keySerializer,
 		@Nonnull CloseableRegistry streamTaskCloseableRegistry,
 		@Nonnull MetricGroup metricGroup) throws Exception {
-
+		// 获取Task实例信息
 		TaskInfo taskInfo = environment.getTaskInfo();
 		OperatorSubtaskDescriptionText operatorSubtaskDescription =
 			new OperatorSubtaskDescriptionText(
@@ -128,6 +148,7 @@ public class StreamTaskStateInitializerImpl implements StreamTaskStateInitialize
 		try {
 
 			// -------------- Keyed State Backend --------------
+			// 创建keyed类型状态后端
 			keyedStatedBackend = keyedStatedBackend(
 				keySerializer,
 				operatorIdentifierText,
@@ -136,12 +157,14 @@ public class StreamTaskStateInitializerImpl implements StreamTaskStateInitialize
 				metricGroup);
 
 			// -------------- Operator State Backend --------------
+			// 创建Operator类型状态后端
 			operatorStateBackend = operatorStateBackend(
 				operatorIdentifierText,
 				prioritizedOperatorSubtaskStates,
 				streamTaskCloseableRegistry);
 
 			// -------------- Raw State Streams --------------
+			// 创建原生类型状态后端
 			rawKeyedStateInputs = rawKeyedStateInputs(
 				prioritizedOperatorSubtaskStates.getPrioritizedRawKeyedState().iterator());
 			streamTaskCloseableRegistry.registerCloseable(rawKeyedStateInputs);
@@ -151,10 +174,11 @@ public class StreamTaskStateInitializerImpl implements StreamTaskStateInitialize
 			streamTaskCloseableRegistry.registerCloseable(rawOperatorStateInputs);
 
 			// -------------- Internal Timer Service Manager --------------
+			// 创建 Internal Timer Service Manager实例
 			timeServiceManager = internalTimeServiceManager(keyedStatedBackend, keyContext, processingTimeService, rawKeyedStateInputs);
 
 			// -------------- Preparing return value --------------
-
+			// 创建 StreamOperatorStateContext实现类
 			return new StreamOperatorStateContextImpl(
 				prioritizedOperatorSubtaskStates.isRestored(),
 				operatorStateBackend,
@@ -226,6 +250,14 @@ public class StreamTaskStateInitializerImpl implements StreamTaskStateInitialize
 		return timeServiceManager;
 	}
 
+	/**
+	 * 1. 创建cancelStreamRegistryForRestore对应的CloseableRegistry并注册到backendCloseableRegistry中，确保在任务取消的情况下能够关闭在恢复状态时构造的数据流。
+	 * 2. 创建OperatorStateBackend对应的BackendRestorerProcedure，OperatorStateBackend中封装了stateBackend.createOperatorStateBackend()方法，并包含了
+	 *    恢复历史状态数据的操作。
+	 * 3. 调用 backendRestorer.createAndRestore()方法创建OperatorStateBackend，并恢复状态数据。其中prioritizedOperatorSubtaskStates是从TaskManager中根据
+	 *    OperatorID获取的算子专有历史状态，可以通过prioritizedOperatorSubtaskStates获取当前算子中的PrioritizedManagedOperatorState并基于状态数据恢复OperatorStateBackend
+	 *    中算子的状态。
+	 */
 	protected OperatorStateBackend operatorStateBackend(
 		String operatorIdentifierText,
 		PrioritizedOperatorSubtaskState prioritizedOperatorSubtaskStates,
@@ -258,6 +290,16 @@ public class StreamTaskStateInitializerImpl implements StreamTaskStateInitialize
 		}
 	}
 
+	/**
+	 * 1. 从environment参数中获取当前Task的TaskInfo，然后从TaskInfo中获取maxNumberOfParallelSubtasks、numberOfParallelSubtasks等参数信息，
+	 *    并基于参数创建KeyGroupRange，用于表示当前Task实例中存储的Key分组区间。
+	 * 2. 创建cancelStreamRegistryForRestore对应的CloseableRegistry并注册到backendCloseableRegistry中，用于确保在任务取消的情况下关闭在恢复状态
+	 *    过程中构造的数据流。
+	 * 3. 创建KeyeStateBackend对应的BackendRestorerProcedure，在BackendRestorerProcedure中封装了stateBackend.createKeyedStateBackend()方法，
+	 *    也包含恢复历史状态数据的方法。
+	 * 4. 调用backendRestorer.createAndRestore()方法创建KeyedStateBackend，同时对状态数据进行恢复。prioritizedOperatorSubtaskStates是从TaskStteManager中
+	 *    根据OperatorID获取的算子历史状态，可以通过prioritizedOperatorSubtaskStates获取当前算子的prioritizedManagedKeyedState，并基于这些状态数据恢复算子的状态。
+	 */
 	protected <K> AbstractKeyedStateBackend<K> keyedStatedBackend(
 		TypeSerializer<K> keySerializer,
 		String operatorIdentifierText,
@@ -281,8 +323,10 @@ public class StreamTaskStateInitializerImpl implements StreamTaskStateInitialize
 		// Now restore processing is included in backend building/constructing process, so we need to make sure
 		// each stream constructed in restore could also be closed in case of task cancel, for example the data
 		// input stream opened for serDe during restore.
+		// 确保恢复状态过程中构建的数据流被关闭
 		CloseableRegistry cancelStreamRegistryForRestore = new CloseableRegistry();
 		backendCloseableRegistry.registerCloseable(cancelStreamRegistryForRestore);
+		// 创建BackendRestorerProcedure
 		BackendRestorerProcedure<AbstractKeyedStateBackend<K>, KeyedStateHandle> backendRestorer =
 			new BackendRestorerProcedure<>(
 				(stateHandles) -> stateBackend.createKeyedStateBackend(

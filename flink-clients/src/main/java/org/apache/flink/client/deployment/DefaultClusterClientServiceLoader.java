@@ -37,18 +37,19 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 public class DefaultClusterClientServiceLoader implements ClusterClientServiceLoader {
 
 	private static final Logger LOG = LoggerFactory.getLogger(DefaultClusterClientServiceLoader.class);
-
+	// 通过Java Service Loaer加载配置的ClusterClientFactory对象
 	private static final ServiceLoader<ClusterClientFactory> defaultLoader = ServiceLoader.load(ClusterClientFactory.class);
 
 	@Override
 	public <ClusterID> ClusterClientFactory<ClusterID> getClusterClientFactory(final Configuration configuration) {
 		checkNotNull(configuration);
-
+        // 创建ClusterClientFactory集合
 		final List<ClusterClientFactory> compatibleFactories = new ArrayList<>();
 		final Iterator<ClusterClientFactory> factories = defaultLoader.iterator();
 		while (factories.hasNext()) {
 			try {
 				final ClusterClientFactory factory = factories.next();
+				// 将符合条件的ClusterClientFactory放入到集合中
 				if (factory != null && factory.isCompatibleWith(configuration)) {
 					compatibleFactories.add(factory);
 				}
@@ -60,7 +61,7 @@ public class DefaultClusterClientServiceLoader implements ClusterClientServiceLo
 				}
 			}
 		}
-
+		// 仅获取一个符合条件的ClusterClientFactory，如果获取多个则抛出异常
 		if (compatibleFactories.size() > 1) {
 			final List<String> configStr =
 					configuration.toMap().entrySet().stream()
@@ -69,7 +70,7 @@ public class DefaultClusterClientServiceLoader implements ClusterClientServiceLo
 
 			throw new IllegalStateException("Multiple compatible client factories found for:\n" + String.join("\n", configStr) + ".");
 		}
-
+		// 返回通过ServiceLoader加载进来ClusterClientFactory
 		return compatibleFactories.isEmpty() ? null : (ClusterClientFactory<ClusterID>) compatibleFactories.get(0);
 	}
 }

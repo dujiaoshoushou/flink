@@ -1036,6 +1036,15 @@ public class Execution implements AccessExecution, Archiveable<ArchivedExecution
 		triggerCheckpointHelper(checkpointId, timestamp, checkpointOptions, advanceToEndOfEventTime);
 	}
 
+	/**
+	 *
+	 * @param checkpointId
+	 * @param timestamp
+	 * @param checkpointOptions
+	 * @param advanceToEndOfEventTime
+	 * 1. 获取当前Execution分配的LogicalSlot，如果LogicalSlot不为空，说明Execution成功分配到Slot计算资源，否则说明Execution没有分配到计算资源，Execution对应的Task实例不会被执行和启动。
+	 * 2. 通过LogicalSlot获取TaskManagerGateway信息，并调用taskManagerGateway.triggerCheckpoint()的RPC方法，触发和执行指定的Checkpoint操作。
+	 */
 	private void triggerCheckpointHelper(long checkpointId, long timestamp, CheckpointOptions checkpointOptions, boolean advanceToEndOfEventTime) {
 
 		final CheckpointType checkpointType = checkpointOptions.getCheckpointType();

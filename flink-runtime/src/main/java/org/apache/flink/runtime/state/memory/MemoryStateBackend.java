@@ -314,6 +314,12 @@ public class MemoryStateBackend extends AbstractFileStateBackend implements Conf
 			cancelStreamRegistry).build();
 	}
 
+	/**
+	 * 1. 从environment参数中获取TaskStateManager实例，通过TaskStateManager获取LocalRecoverConfig，即本地状态恢复的配置信息，
+	 *    包括存储状态数据所对应的本地文件夹等。
+	 * 2. 创建HeapPriorityQueueSetFactory实例，用于生成HeapPriorityQueueSet优先级队列，存储TimerHeapInternalTimer等数据。
+	 * 3. 创建HeapKeyedStateBackendBuilder构造类，并调用HeapKeyedStateBackendBuilder.build()方法创建HeapKeyedStateBackend。
+	 */
 	@Override
 	public <K> AbstractKeyedStateBackend<K> createKeyedStateBackend(
 		Environment env,
@@ -327,10 +333,12 @@ public class MemoryStateBackend extends AbstractFileStateBackend implements Conf
 		MetricGroup metricGroup,
 		@Nonnull Collection<KeyedStateHandle> stateHandles,
 		CloseableRegistry cancelStreamRegistry) throws BackendBuildingException {
-
+		// 获取TaskStateManager实例
 		TaskStateManager taskStateManager = env.getTaskStateManager();
+		// 创建HeapPriorityQueueSetFactory实例
 		HeapPriorityQueueSetFactory priorityQueueSetFactory =
 			new HeapPriorityQueueSetFactory(keyGroupRange, numberOfKeyGroups, 128);
+		// 创建HeapKeyedStateBackendBuilder实例HeapKeyedStateBackend
 		return new HeapKeyedStateBackendBuilder<>(
 			kvStateRegistry,
 			keySerializer,

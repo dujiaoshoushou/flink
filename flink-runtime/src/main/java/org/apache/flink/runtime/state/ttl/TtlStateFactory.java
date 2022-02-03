@@ -61,10 +61,12 @@ public class TtlStateFactory<K, N, SV, TTLSV, S extends State, IS extends S> {
 		StateDescriptor<S, SV> stateDesc,
 		KeyedStateBackend<K> stateBackend,
 		TtlTimeProvider timeProvider) throws Exception {
+		// 进行非空检查
 		Preconditions.checkNotNull(namespaceSerializer);
 		Preconditions.checkNotNull(stateDesc);
 		Preconditions.checkNotNull(stateBackend);
 		Preconditions.checkNotNull(timeProvider);
+		// 判断是否需要创建TtlState
 		return  stateDesc.getTtlConfig().isEnabled() ?
 			new TtlStateFactory<K, N, SV, TTLSV, S, IS>(
 				namespaceSerializer, stateDesc, stateBackend, timeProvider)

@@ -258,20 +258,30 @@ public class HeapKeyedStateBackend<K> extends AbstractKeyedStateBackend<K> {
 		return table.getKeys(namespace);
 	}
 
+	/**
+	 *
+	 * 1. 从STATE_FACTORIES集合中根据StateDescriptor的类名获取相应的StateFactory。STATE_FACTORIES在初始化HeapKeyedStateBackend的过程中会
+	 *    事先将StateDescriptor的ClassName和StateFactory存储在Map<Class<? extends StateDescriptor>, StateFactory>集合中。
+	 * 2. 尝试注册StateTable。StateTable借助StateMap集合存储状态数据，并通过指定Key访问StateObject，即KeyedState借助StateTable存储状态数据。
+	 * 3. 调用stateFactory.createState()方法创建State并返回。
+	 */
 	@Override
 	@Nonnull
 	public <N, SV, SEV, S extends State, IS extends S> IS createInternalState(
 		@Nonnull TypeSerializer<N> namespaceSerializer,
 		@Nonnull StateDescriptor<S, SV> stateDesc,
 		@Nonnull StateSnapshotTransformFactory<SEV> snapshotTransformFactory) throws Exception {
+		// 从STATE_FACTORIES集合中根据state的类名获取相应的StateFactory
 		StateFactory stateFactory = STATE_FACTORIES.get(stateDesc.getClass());
 		if (stateFactory == null) {
 			String message = String.format("State %s is not supported by %s",
 				stateDesc.getClass(), this.getClass());
 			throw new FlinkRuntimeException(message);
 		}
+		// 尝试注册和创建StateTable
 		StateTable<K, N, SV> stateTable = tryRegisterStateTable(
 			namespaceSerializer, stateDesc, getStateSnapshotTransformFactory(stateDesc, snapshotTransformFactory));
+		// 调用stateFactory.createState()方法创建状态。
 		return stateFactory.createState(stateDesc, stateTable, getKeySerializer());
 	}
 

@@ -243,6 +243,11 @@ class HeapSnapshotStrategy<K>
 		return snapshotStrategySynchronicityTrait.newStateTable(keyContext, newMetaInfo, keySerializer);
 	}
 
+	/**
+	 * 1. 从registeredStates中获取kvState的集合，分别遍历StateSnapshotRestore。
+	 * 2. 判断StateSnapshotRestore不为空，并调用StateSnapshotRestore.stateSnapshot()方法,此时会创建StateSnapshot对象。
+	 * 3. 将创建的StateSnapshot添加的到metaInfoSnapshots和cowStateStableSnapshots集合中，完成堆内存存储类型的KvState的快照操作。
+	 */
 	private void processSnapshotMetaInfoForAllStates(
 		List<StateMetaInfoSnapshot> metaInfoSnapshots,
 		Map<StateUID, StateSnapshot> cowStateStableSnapshots,

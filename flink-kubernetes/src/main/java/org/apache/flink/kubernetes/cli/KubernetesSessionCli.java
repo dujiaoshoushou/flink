@@ -86,21 +86,26 @@ public class KubernetesSessionCli {
 	}
 
 	private int run(String[] args) throws FlinkException, CliArgsException {
+		// 获取有效配置项Configuration
 		final Configuration configuration = getEffectiveConfiguration(args);
-
+		// 通过clusterClientServiceLoader加载ClusterClientFactory
 		final ClusterClientFactory<String> kubernetesClusterClientFactory =
 			clusterClientServiceLoader.getClusterClientFactory(configuration);
-
+		// 创建kubernetesClusterDescriptor
 		final ClusterDescriptor<String> kubernetesClusterDescriptor =
 			kubernetesClusterClientFactory.createClusterDescriptor(configuration);
 
 		try {
+			// 开始创建Session集群
 			final ClusterClient<String> clusterClient;
+			// 获取clusterId
 			String clusterId = kubernetesClusterClientFactory.getClusterId(configuration);
 			final boolean detached = !configuration.get(DeploymentOptions.ATTACHED);
+			// 创建FlinkKubeClient，用于和Kubernetes集群交互
 			final FlinkKubeClient kubeClient = KubeClientFactory.fromConfiguration(configuration);
 
 			// Retrieve or create a session cluster.
+			// 获取或直接创建新的Session集群并返回clusterClient
 			if (clusterId != null && kubeClient.getInternalService(clusterId) != null) {
 				clusterClient = kubernetesClusterDescriptor.retrieve(clusterId).getClusterClient();
 			} else {
@@ -113,6 +118,7 @@ public class KubernetesSessionCli {
 
 			try {
 				if (!detached) {
+					// 如果不是detached模式，则可以继续喝集群之间通过命令行方式交互
 					Tuple2<Boolean, Boolean> continueRepl = new Tuple2<>(true, false);
 					try (BufferedReader in = new BufferedReader(new InputStreamReader(System.in))) {
 						while (continueRepl.f0) {
@@ -125,6 +131,7 @@ public class KubernetesSessionCli {
 						kubernetesClusterDescriptor.killCluster(clusterId);
 					}
 				}
+				// 关闭clusterClient和kubeClient的连接
 				clusterClient.close();
 				kubeClient.close();
 			} catch (Exception e) {

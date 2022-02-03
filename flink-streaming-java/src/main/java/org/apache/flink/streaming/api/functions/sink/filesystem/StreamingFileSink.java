@@ -400,7 +400,7 @@ public class StreamingFileSink<IN>
 	public void initializeState(FunctionInitializationContext context) throws Exception {
 		final int subtaskIndex = getRuntimeContext().getIndexOfThisSubtask();
 		this.buckets = bucketsBuilder.createBuckets(subtaskIndex);
-
+		// 从FunctionInitializationContext中获取OperatorStateStore实例
 		final OperatorStateStore stateStore = context.getOperatorStateStore();
 		bucketStates = stateStore.getListState(BUCKET_STATE_DESC);
 		maxPartCountersState = stateStore.getUnionListState(MAX_PART_COUNTER_STATE_DESC);

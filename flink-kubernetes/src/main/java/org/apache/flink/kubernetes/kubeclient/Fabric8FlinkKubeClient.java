@@ -75,11 +75,15 @@ public class Fabric8FlinkKubeClient implements FlinkKubeClient {
 	private final KubernetesClient internalClient;
 	private final String clusterId;
 	private final String nameSpace;
-
+	// 通过configMapDecorators集合存储configMap资源对象对应的参数装饰器
 	private final List<Decorator<ConfigMap, KubernetesConfigMap>> configMapDecorators = new ArrayList<>();
+	// 通过internalServiceDecorators集合存储Flink内部Service资源对象对应的参数装饰器
 	private final List<Decorator<Service, KubernetesService>> internalServiceDecorators = new ArrayList<>();
+	// 通过restServiceDecorators计划存储Flink对外的Rest服务资源对应的参数装饰器
 	private final List<Decorator<Service, KubernetesService>> restServiceDecorators = new ArrayList<>();
+	// 通过flinkMasterDeploymentDecorators集合存储Deployment资源对象对应的参数装饰器。
 	private final List<Decorator<Deployment, KubernetesDeployment>> flinkMasterDeploymentDecorators = new ArrayList<>();
+	// 通过taskManagerPodDecorators集合存储TaskManagerPod资源对象对应的参数装饰器。
 	private final List<Decorator<Pod, KubernetesPod>> taskManagerPodDecorators = new ArrayList<>();
 
 	public Fabric8FlinkKubeClient(Configuration flinkConfig, KubernetesClient client) {
@@ -140,16 +144,17 @@ public class Fabric8FlinkKubeClient implements FlinkKubeClient {
 
 	@Override
 	public void createFlinkMasterDeployment(ClusterSpecification clusterSpecification) {
+		// 通过FlinkConfig创建taskManagerPodDecorators
 		KubernetesDeployment deployment = new KubernetesDeployment(this.flinkConfig);
 
 		for (Decorator<Deployment, KubernetesDeployment> d : this.flinkMasterDeploymentDecorators) {
 			deployment = d.decorate(deployment);
 		}
-
+		// 创建FlinkMasterDeployment
 		deployment = new FlinkMasterDeploymentDecorator(clusterSpecification).decorate(deployment);
 
 		LOG.debug("Create Flink Master deployment with spec: {}", deployment.getInternalResource().getSpec());
-
+		// 调用KubernetesClient创建Deployment
 		this.internalClient
 			.apps()
 			.deployments()
@@ -293,19 +298,20 @@ public class Fabric8FlinkKubeClient implements FlinkKubeClient {
 	private CompletableFuture<KubernetesService> createService(
 			String serviceName,
 			List<Decorator<Service, KubernetesService>> serviceDecorators) {
+		// 创建KubernetesService资源描述
 		KubernetesService kubernetesService = new KubernetesService(this.flinkConfig);
 		for (Decorator<Service, KubernetesService> d : serviceDecorators) {
 			kubernetesService = d.decorate(kubernetesService);
 		}
 
 		LOG.debug("Create service {} with spec: {}", serviceName, kubernetesService.getInternalResource().getSpec());
-
+		// 调用internalClient创建kubernetesService指定的Service
 		this.internalClient.services().create(kubernetesService.getInternalResource());
-
+		// 创建ActionWatcher，用于监控Service的创建行为
 		final ActionWatcher<Service> watcher = new ActionWatcher<>(
 			Watcher.Action.ADDED,
 			kubernetesService.getInternalResource());
-
+		// 创建watchConnectionManager
 		final Watch watchConnectionManager = this.internalClient
 			.services()
 			.inNamespace(this.nameSpace)
@@ -314,7 +320,7 @@ public class Fabric8FlinkKubeClient implements FlinkKubeClient {
 
 		final Duration timeout = TimeUtils.parseDuration(
 			flinkConfig.get(KubernetesConfigOptions.SERVICE_CREATE_TIMEOUT));
-
+		// 返回创建的KubernetesService对象
 		return CompletableFuture.supplyAsync(
 			FunctionUtils.uncheckedSupplier(() -> {
 				final Service createdService = watcher.await(timeout.toMillis(), TimeUnit.MILLISECONDS);

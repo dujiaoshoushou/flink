@@ -440,6 +440,27 @@ public class ExecutionGraph implements AccessExecutionGraph {
 		return Optional.ofNullable(stateBackendName);
 	}
 
+	/**
+	 *
+	 * @param chkConfig
+	 * @param verticesToTrigger
+	 * @param verticesToWaitFor
+	 * @param verticesToCommitTo
+	 * @param masterHooks
+	 * @param checkpointIDCounter
+	 * @param checkpointStore
+	 * @param checkpointStateBackend
+	 * @param statsTracker
+	 * 1. 将verticesToTrigger、verticesToWaitFor、verticesToCommitTo三个ExecutionJobVertex集合转换为ExecutionVertex[]数组，每个ExecutionVertex
+	 *    代表ExecutionJobVertex中的一个SubTask节点。
+	 * 2. 创建CheckpointFailureManager，用于Checkpoint执行过程中的容错管理，包含failJob和failJobDueToTaskFailure两个处理方法。
+	 * 3. 创建checkpointCoordinatorTimer，用于Checkpoint异步线程的定时调度和执行。
+	 * 4. 创建checkpointCoordinator组件，通过checkpointCoordinator协调和管理作用中的Checkpoint，同时收集Task节点中Checkpoint的执行状况等信息。
+	 * 5. 将MasterHook 注册到CheckPointCoordinator中，实现用户自定义Hook代码的调用。
+	 * 6. 判断chkConfig.getCheckpointInterval()方法返回指标是否不等于Long.Max_VALUE,则表明当前系统开启Checkpoint功能并调用registerJobStatusListener()方法，
+	 *    将JobStatusListener的实现类CheckpointCoordinatorDeActivator注册到JobManager中，此时系统会根据作业的运行状态控制CheckpointCoordinator的启停，
+	 *    当作用的状态为Running时会触发启动CheckpointCoordinator组件。
+	 */
 	public void enableCheckpointing(
 			CheckpointCoordinatorConfiguration chkConfig,
 			List<ExecutionJobVertex> verticesToTrigger,
@@ -459,7 +480,7 @@ public class ExecutionGraph implements AccessExecutionGraph {
 		ExecutionVertex[] tasksToCommitTo = collectExecutionVertices(verticesToCommitTo);
 
 		checkpointStatsTracker = checkNotNull(statsTracker, "CheckpointStatsTracker");
-
+		// 创建CheckpointFailureManager
 		CheckpointFailureManager failureManager = new CheckpointFailureManager(
 			chkConfig.getTolerableCheckpointFailureNumber(),
 			new CheckpointFailureManager.FailJobCallback() {
@@ -476,12 +497,13 @@ public class ExecutionGraph implements AccessExecutionGraph {
 		);
 
 		checkState(checkpointCoordinatorTimer == null);
-
+		// 创建checkpointCoordinatorTimer
 		checkpointCoordinatorTimer = Executors.newSingleThreadScheduledExecutor(
 			new DispatcherThreadFactory(
 				Thread.currentThread().getThreadGroup(), "Checkpoint Timer"));
 
 		// create the coordinator that triggers and commits checkpoints and holds the state
+		// 创建checkpointCoordinator
 		checkpointCoordinator = new CheckpointCoordinator(
 			jobInformation.getJobId(),
 			chkConfig,
@@ -497,16 +519,18 @@ public class ExecutionGraph implements AccessExecutionGraph {
 			failureManager);
 
 		// register the master hooks on the checkpoint coordinator
+		//向checkpoint Coordinator中注册 master Hooks
 		for (MasterTriggerRestoreHook<?> hook : masterHooks) {
 			if (!checkpointCoordinator.addMasterHook(hook)) {
 				LOG.warn("Trying to register multiple checkpoint hooks with the name: {}", hook.getIdentifier());
 			}
 		}
-
+		// 向checkpointCoordinator中设定checkpointStatsTracker
 		checkpointCoordinator.setCheckpointStatsTracker(checkpointStatsTracker);
 
 		// interval of max long value indicates disable periodic checkpoint,
 		// the CheckpointActivatorDeactivator should be created only if the interval is not max value
+		// 注册JobStatusListener，用于自动启动CheckpointCoordinator
 		if (chkConfig.getCheckpointInterval() != Long.MAX_VALUE) {
 			// the periodic checkpoint scheduler is activated and deactivated as a result of
 			// job status changes (running -> on, all other states -> off)

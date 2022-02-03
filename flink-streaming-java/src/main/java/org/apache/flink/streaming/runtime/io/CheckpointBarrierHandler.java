@@ -74,15 +74,23 @@ public abstract class CheckpointBarrierHandler {
 
 	public abstract void checkpointSizeLimitExceeded(long maxBufferedBytes) throws Exception;
 
+	/**
+	 * 1. 判断toNotifyOnCheckpoint不为空，这里的toNotifyOnCheckpoint实例实际上就是AbstractInvokable实现类，在AbstractInvokable中提供了触发Checkpoint操作的相关方法。
+	 *    StreamTask是唯一实现了Checkpoint方法的子类，即只有StreamTask才能触发当前Task实例中的Checkpoint操作。
+	 * 2. 创建CheckpointMetaData和CheckpointMetrics实例，CheckpointMetaData用于存储Checkpoint的元信息，CheckpointMetrics用于记录和监控Checkpoint监控指标。
+	 * 3. 调用toNotifyOnCheckpoint.triggerCheckpointOnBarrier()方法触发StreamTask中算子的Checkpoint操作。
+	 * 4. triggerCheckpointOnBarrier()方法基本上和CheckpointCoordinator触发数据源节点的Checkpoint操作执行过程一致。
+	 */
 	protected void notifyCheckpoint(CheckpointBarrier checkpointBarrier, long bufferedBytes, long alignmentDurationNanos) throws Exception {
 		if (toNotifyOnCheckpoint != null) {
+			// 创建CheckpointMetaData对象用于存储Meta信息
 			CheckpointMetaData checkpointMetaData =
 				new CheckpointMetaData(checkpointBarrier.getId(), checkpointBarrier.getTimestamp());
-
+			// 创建CheckpointMetrics对象用于记录监控指标
 			CheckpointMetrics checkpointMetrics = new CheckpointMetrics()
 				.setBytesBufferedInAlignment(bufferedBytes)
 				.setAlignmentDurationNanos(alignmentDurationNanos);
-
+			// 调用toNotifyOnCheckpoint.triggerCheckpointOnBarrier()方法触发Checkpoint操作
 			toNotifyOnCheckpoint.triggerCheckpointOnBarrier(
 				checkpointMetaData,
 				checkpointBarrier.getCheckpointOptions(),

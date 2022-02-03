@@ -137,10 +137,19 @@ public class StreamingRuntimeContext extends AbstractRuntimeUDFContext {
 	//  key/value state
 	// ------------------------------------------------------------------------
 
+	/**
+	 * 1. 调用checkPreconditionsAndGetKeyedStateStore()方法对ValueStateDescriptor进行校验，然后获取算子中的KeyedStateStore。
+	 *    KeyedStateStore对KeyStateBackend进行了封装，并提供给RuntimeContext接口使用。
+	 * 2. 根据ExecutionConfig中的参数初始化ValueStateDescriptor的序列化器。如果ValueStateDescriptor中的序列化器已经创建，则不再进行初始化。
+	 * 3. 通过keyedStateStore.getState()方法创建和获取ValueState。
+	 */
 	@Override
 	public <T> ValueState<T> getState(ValueStateDescriptor<T> stateProperties) {
+		// 首先获取keyedStateStore
 		KeyedStateStore keyedStateStore = checkPreconditionsAndGetKeyedStateStore(stateProperties);
+		// 初始化stateProperties中的序列化类
 		stateProperties.initializeSerializerUnlessSet(getExecutionConfig());
+		// 通过keyedStateStore.getState()方法获取ValueState
 		return keyedStateStore.getState(stateProperties);
 	}
 

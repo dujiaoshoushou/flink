@@ -768,6 +768,12 @@ public class TaskExecutor extends RpcEndpoint implements TaskExecutorGateway {
 	// Checkpointing RPCs
 	// ----------------------------------------------------------------------
 
+	/**
+	 * 1. 检查CheckpointType的类型，CheckpointType共有三种类型，分别为CHECKPOINT、SAVEPOINT、SYNC_SAVEPOINT，且只有在同步Savepoints操作时才能调整Watermark为MAX。
+	 * 2. 从taskSlotTable中获取Execution对应的Task实例，如果Task实例不为空，则调用task.triggerCheckpointBarrier()方法执行Task实例中的Checkpoint操作。
+	 * 3. 如果Task实例为空，说明Task目前处于异常，无法执行Checkpoint操作。此时调用FutureUtils.completedExceptionally()方法，并封装CheckpointException异常信息，
+	 *    返回给管理节点的CheckpointCoordinator进行处理。
+	 */
 	@Override
 	public CompletableFuture<Acknowledge> triggerCheckpoint(
 			ExecutionAttemptID executionAttemptID,

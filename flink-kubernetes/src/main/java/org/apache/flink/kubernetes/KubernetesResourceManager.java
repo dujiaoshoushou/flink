@@ -136,8 +136,9 @@ public class KubernetesResourceManager extends ActiveResourceManager<KubernetesW
 
 	@Override
 	protected void initialize() throws ResourceManagerException {
+		// 恢复之前启动的TaskManager节点
 		recoverWorkerNodesFromPreviousAttempts();
-
+		// 向kubeClient中增加回调函数。
 		kubeClient.watchPodsAndDoCallback(getTaskManagerLabels(), this);
 	}
 
@@ -167,6 +168,7 @@ public class KubernetesResourceManager extends ActiveResourceManager<KubernetesW
 	@Override
 	public Collection<ResourceProfile> startNewWorker(ResourceProfile resourceProfile) {
 		LOG.info("Starting new worker with resource profile, {}", resourceProfile);
+		// 对应ResourceProfile资源进行匹配
 		if (!resourceProfilesPerWorker.iterator().next().isMatching(resourceProfile)) {
 			return Collections.emptyList();
 		}
@@ -244,6 +246,12 @@ public class KubernetesResourceManager extends ActiveResourceManager<KubernetesW
 			++currentMaxAttemptId);
 	}
 
+	/**
+	 * 1. 生成podName并将使用到的环境配置信息存放到创建的HashMap<String,String> env集合中。
+	 * 2. 根据podName以及env配置信息创建TaskManagerPodParameter，其中也包括TaskManager实例在Pod中的启动命令taskManagerStartCommand以及
+	 *    defaultMemoryMB、defaultCpu等配置信息。
+	 * 3. 通过TaskManagerPodParameter参数，调用kubeClient创建TaskmanagerPod资源。此时在Kubernetes集群上会启动TaskManager Pod。
+	 */
 	private void requestKubernetesPod() {
 		numPendingPodRequests++;
 
@@ -295,6 +303,12 @@ public class KubernetesResourceManager extends ActiveResourceManager<KubernetesW
 		}
 	}
 
+	/**
+	 * 1. 从flinkConfig中获取创建TaskManager启动命令的参数信息，包括hasLogback、hasLog4j、logDir等配置。
+	 * 2. 通过flinkConfig配置创建main()方法执行需要的参数信息，启动TaskManager使用入口类为KubernetesTaskExecutorRunner。
+	 * 3. 调用KubernetesUtils.getTaskManagerStartCommand()方法创建TaskManagerStartCommand.
+	 * @return
+	 */
 	private List<String> getTaskManagerStartCommand() {
 		final String confDir = flinkConfig.getString(KubernetesConfigOptions.FLINK_CONF_DIR);
 		final boolean hasLogback = new File(confDir, Constants.CONFIG_FILE_LOGBACK_NAME).exists();

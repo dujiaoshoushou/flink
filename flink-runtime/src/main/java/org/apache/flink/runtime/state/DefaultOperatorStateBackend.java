@@ -58,26 +58,31 @@ public class DefaultOperatorStateBackend implements OperatorStateBackend {
 
 	/**
 	 * Map for all registered operator states. Maps state name -> state
+	 * 用于存储所有注册在OperatorStateBackend中的OperatorState，其中key为状态名称，value为注册的PartitionableListState
 	 */
 	private final Map<String, PartitionableListState<?>> registeredOperatorStates;
 
 	/**
 	 * Map for all registered operator broadcast states. Maps state name -> state
+	 * 用于存储所有注册在OperatorStateBackend中的BroadcastState，其中key为状态名称，value为注册的BackendWritableBroadcastState。
 	 */
 	private final Map<String, BackendWritableBroadcastState<?, ?>> registeredBroadcastStates;
 
 	/**
 	 * CloseableRegistry to participate in the tasks lifecycle.
+	 * 存储用于注册的Closeable接口实现类，并根据Task的生命周期调用close()方法，实现相应组件的关闭操作。
 	 */
 	private final CloseableRegistry closeStreamOnCancelRegistry;
 
 	/**
 	 * Default typeSerializer. Only used for the default operator state.
+	 * 系统中默认的Java序列化类，用于对Operator State数据进行序列化
 	 */
 	private final JavaSerializer<Serializable> deprecatedDefaultJavaSerializer = new JavaSerializer<>();
 
 	/**
 	 * The execution configuration.
+	 * 应用执行中的配置信息，如并行度、ExecutionMode等参数。
 	 */
 	private final ExecutionConfig executionConfig;
 
@@ -90,11 +95,16 @@ public class DefaultOperatorStateBackend implements OperatorStateBackend {
 	 * <p>TODO this map should be moved to a base class once we have proper hierarchy for the operator state backends.
 	 *
 	 * @see <a href="https://issues.apache.org/jira/browse/FLINK-6849">FLINK-6849</a>
+	 * 用于快速获取状态的缓存实现，registeredOperatorStates可以填充和恢复的状态数据，单accessedStatesByName的缓存集合在系统重启后就会置空。
 	 */
 	private final Map<String, PartitionableListState<?>> accessedStatesByName;
-
+	/**
+	 * 和accessedStatesByName类似，也是通过Map数据结构存储Broadcast状态名称和BroadcastState，根据名称快速获取相应的广播状态数据。
+	 */
 	private final Map<String, BackendWritableBroadcastState<?, ?>> accessedBroadcastStatesByName;
-
+	/**
+	 * 用于对OperatorStateBackend中的状态数据进行快照操作，实现将状态数据持久化到外部文件系统中，进而保证系统的状态数据一致性。
+	 */
 	private final AbstractSnapshotStrategy<OperatorStateHandle> snapshotStrategy;
 
 	public DefaultOperatorStateBackend(
@@ -264,15 +274,35 @@ public class DefaultOperatorStateBackend implements OperatorStateBackend {
 		return snapshotRunner;
 	}
 
+	/**
+	 *
+	 * @param stateDescriptor
+	 * @param mode
+	 * @param <S>
+	 * @return
+	 * @throws StateMigrationException
+	 * 1. 确认stateDescriptor不为空，并获取stateDescriptor中的状态名称。
+	 * 2. 从accessedStatesByName缓存集合中获取已经创建的PartitionableListState，如果获取成功，则调用checkStateNameAndMode()方法与之前创建的
+	 *    状态名称和类型进行对比，如果匹配成功则直接返回PartitionableListState。
+	 * 3. 如果从accessedStatesByName集合中没有获取到创建算子状态，则创建新的PartitionableListState
+	 * 4. 创建算子状态时先调用initializeSerializerUnlessSet()方法初始化状态的序列化器。
+	 * 5. 从registeredOperatorStates集合中获取OperatorState，registeredOperatorStates中存储了已经注册的OperatorState。
+	 * 6. 如果没有从registeredOperatorStates中获取到OperatorState，则根据stateDescriptor的描述，创建新的PartitionableListState，
+	 *    并将OperatorState存储到registeredOperatorStates集合中。
+	 * 7. 如果获取到OperatorState，则调用checkStateNameAndMode()方法与之前创建的状态名称和类型进行对比，匹配成功则返回PartitionableListState。
+	 *    同时检查newPartitionStateSerializer和partitionableListState中的TypeSerializer是否兼容，如果不检查则抛出异常。
+	 * 8. 将partitionableListState存储到accessedStatesByName集合中，并返回partitionableListState
+	 */
 	private <S> ListState<S> getListState(
 			ListStateDescriptor<S> stateDescriptor,
 			OperatorStateHandle.Mode mode) throws StateMigrationException {
-
+		// 检查stateDescriptor是否为空
 		Preconditions.checkNotNull(stateDescriptor);
 		String name = Preconditions.checkNotNull(stateDescriptor.getName());
-
+		// 从accessedStatesByName集合中获取之前创建的PartitionableListState
 		@SuppressWarnings("unchecked")
 		PartitionableListState<S> previous = (PartitionableListState<S>) accessedStatesByName.get(name);
+		// 如果previous不为空，则调用checkStateNameAndMode()检查名称和模式
 		if (previous != null) {
 			checkStateNameAndMode(
 					previous.getStateMetaInfo().getName(),
@@ -285,13 +315,13 @@ public class DefaultOperatorStateBackend implements OperatorStateBackend {
 		// end up here if its the first time access after execution for the
 		// provided state name; check compatibility of restored state, if any
 		// TODO with eager registration in place, these checks should be moved to restore()
-
+		// 如果没有获取到OperatorState，则创建一个OperatorState，调用initializeSerializerUnlessSet()对序列化类进行初始化
 		stateDescriptor.initializeSerializerUnlessSet(getExecutionConfig());
 		TypeSerializer<S> partitionStateSerializer = Preconditions.checkNotNull(stateDescriptor.getElementSerializer());
-
+		// 从registeredOperatorStates集合汇OperatorState
 		@SuppressWarnings("unchecked")
 		PartitionableListState<S> partitionableListState = (PartitionableListState<S>) registeredOperatorStates.get(name);
-
+		// 如果为空，则直接创建PartitionableListState实例
 		if (null == partitionableListState) {
 			// no restored state for the state name; simply create new state holder
 
@@ -300,11 +330,11 @@ public class DefaultOperatorStateBackend implements OperatorStateBackend {
 					name,
 					partitionStateSerializer,
 					mode));
-
+			// 将PartitionableListState注册到registeredOperatorStates集合中
 			registeredOperatorStates.put(name, partitionableListState);
 		} else {
 			// has restored state; check compatibility of new state access
-
+			// 如果含有OperatorState，则检查名称和模式是否匹配
 			checkStateNameAndMode(
 					partitionableListState.getStateMetaInfo().getName(),
 					name,
@@ -315,6 +345,7 @@ public class DefaultOperatorStateBackend implements OperatorStateBackend {
 				partitionableListState.getStateMetaInfo();
 
 			// check compatibility to determine if new serializers are incompatible
+			// 检查newPartitionStateSerializer是否和partitionStateSerializer中的TypeSerializer兼容
 			TypeSerializer<S> newPartitionStateSerializer = partitionStateSerializer.duplicate();
 
 			TypeSerializerSchemaCompatibility<S> stateCompatibility =
@@ -322,10 +353,10 @@ public class DefaultOperatorStateBackend implements OperatorStateBackend {
 			if (stateCompatibility.isIncompatible()) {
 				throw new StateMigrationException("The new state typeSerializer for operator state must not be incompatible.");
 			}
-
+			// 设定partitionableListState的MetaInfo信息
 			partitionableListState.setStateMetaInfo(restoredPartitionableListStateMetaInfo);
 		}
-
+		// 将partitionableListState放入accessedStatesByName缓存中
 		accessedStatesByName.put(name, partitionableListState);
 		return partitionableListState;
 	}

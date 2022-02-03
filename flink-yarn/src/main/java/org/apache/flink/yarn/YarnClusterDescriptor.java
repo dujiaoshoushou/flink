@@ -418,18 +418,29 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 	 * @param yarnClusterEntrypoint Class name of the Yarn cluster entry point.
 	 * @param jobGraph A job graph which is deployed with the Flink cluster, {@code null} if none
 	 * @param detached True if the cluster should be started in detached mode
-	 */
+	 * 1. 通过UserGroupInformation消息判断集群是否开启了Kerberos安全认证
+	 * 2. 判断所有传入的参数是否有效，例如判断JAR路径和Configuration是否为空，配置的虚核数不能超过Yarn的最大虚拟内核数等，只有当这些条件满足后才能部署集群。
+	 * 3. 调用checkYarnQueues()方法检查指定的Yarn队列是否存在，如不不存在则抛出异常。
+	 * 4. 通过YarnClient创建YarnClientApplication，同时获取集群freeClusterMem，以及最小分配的内存大小，然后调用validClusterSpecification()方法检验
+	 *    Flink集群ClusterSpecification中的资源申请是否符合条件，符合则返回 validClusterSpecification，不符合则返回部署失败。
+	 * 5. 调用startAppMaster()方法启动AppMaster，此时会在Yarn上启动Flink集群管理节点和ApplicationMaster服务。
+	 * 6. 如果客户端的启动模式为detached，则直接输出yarnApplicationId等集群信息。
+	 * 7. 启动成功后YarnClient会返回ApplicationReport，从中可以获取Flink集群管理节点对应的Rest服务的地址和端口，然后调用 setClusterEntrypointInfoToConfig()
+	 *    方法将这些动态参数设定到Flink配置中。
+	 * 8. 返回可以和Flink集群交互的RestClusterClient，供客户端提交任务时使用。
+	 * */
 	private ClusterClientProvider<ApplicationId> deployInternal(
 			ClusterSpecification clusterSpecification,
 			String applicationName,
 			String yarnClusterEntrypoint,
 			@Nullable JobGraph jobGraph,
 			boolean detached) throws Exception {
-
+		// 通过UserGroupInformation 判断集群是否开启了安全认证，如果开启了安全认证
 		if (UserGroupInformation.isSecurityEnabled()) {
 			// note: UGI::hasKerberosCredentials inaccurately reports false
 			// for logins based on a keytab (fixed in Hadoop 2.6.1, see HADOOP-10786),
 			// so we check only in ticket cache scenario.
+			// 获取useTicketCache配置
 			boolean useTicketCache = flinkConfiguration.getBoolean(SecurityOptions.KERBEROS_LOGIN_USETICKETCACHE);
 
 			UserGroupInformation loginUser = UserGroupInformation.getCurrentUser();
@@ -440,21 +451,22 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 						"does not have Kerberos credentials");
 			}
 		}
-
+		// 判断所有的参数是否满足条件
 		isReadyForDeployment(clusterSpecification);
 
 		// ------------------ Check if the specified queue exists --------------------
-
+		// 检查指定的Yarn队列是否存在
 		checkYarnQueues(yarnClient);
 
 		// ------------------ Check if the YARN ClusterClient has the requested resources --------------
 
 		// Create application via yarnClient
+		// 通过yarnClient创建Application
 		final YarnClientApplication yarnApplication = yarnClient.createApplication();
 		final GetNewApplicationResponse appResponse = yarnApplication.getNewApplicationResponse();
 
 		Resource maxRes = appResponse.getMaximumResourceCapability();
-
+		// 获取集群freeClusterMem
 		final ClusterResourceDescription freeClusterMem;
 		try {
 			freeClusterMem = getCurrentFreeClusterResources(yarnClient);
@@ -462,9 +474,9 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 			failSessionDuringDeployment(yarnClient, yarnApplication);
 			throw new YarnDeploymentException("Could not retrieve information about free cluster resources.", e);
 		}
-
+		// 获取Yarn最小分配的内存
 		final int yarnMinAllocationMB = yarnConfiguration.getInt(YarnConfiguration.RM_SCHEDULER_MINIMUM_ALLOCATION_MB, 0);
-
+		// 检查集群描述文件是否符合条件
 		final ClusterSpecification validClusterSpecification;
 		try {
 			validClusterSpecification = validateClusterResources(
@@ -484,7 +496,7 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 				: ClusterEntrypoint.ExecutionMode.NORMAL;
 
 		flinkConfiguration.setString(ClusterEntrypoint.EXECUTION_MODE, executionMode.toString());
-
+		// 启动AppMaster服务
 		ApplicationReport report = startAppMaster(
 				flinkConfiguration,
 				applicationName,
@@ -495,13 +507,13 @@ public class YarnClusterDescriptor implements ClusterDescriptor<ApplicationId> {
 				validClusterSpecification);
 
 		// print the application id for user to cancel themselves.
-		if (detached) {
+		if (detached) { // 如果启动模式是detached，则输出yarnApplicationId等集群信息
 			final ApplicationId yarnApplicationId = report.getApplicationId();
 			logDetachedClusterInformation(yarnApplicationId, LOG);
 		}
-
+		// 设定集群Rest连接端口信息
 		setClusterEntrypointInfoToConfig(report);
-
+		// 返回创建的RestClusterClient
 		return () -> {
 			try {
 				return new RestClusterClient<>(flinkConfiguration, report.getApplicationId());
