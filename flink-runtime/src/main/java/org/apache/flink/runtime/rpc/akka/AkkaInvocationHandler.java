@@ -112,7 +112,7 @@ class AkkaInvocationHandler implements InvocationHandler, AkkaBasedEndpoint, Rpc
 		Class<?> declaringClass = method.getDeclaringClass();
 
 		Object result;
-
+		// 本地调用
 		if (declaringClass.equals(AkkaBasedEndpoint.class) ||
 			declaringClass.equals(Object.class) ||
 			declaringClass.equals(RpcGateway.class) ||
@@ -126,6 +126,7 @@ class AkkaInvocationHandler implements InvocationHandler, AkkaBasedEndpoint, Rpc
 				"fencing token. Please use RpcService#connect(RpcService, F, Time) with F being the fencing token to " +
 				"retrieve a properly FencedRpcGateway.");
 		} else {
+			// RPC 远程调用
 			result = invokeRpc(method, args);
 		}
 
@@ -190,27 +191,35 @@ class AkkaInvocationHandler implements InvocationHandler, AkkaBasedEndpoint, Rpc
 	 * @param args of the method call
 	 * @return result of the RPC
 	 * @throws Exception if the RPC invocation fails
+	 * 1. 获取被调用的RpcGateway接口的methodName、parameterTypes、parameterAnnotations等参信息，并基于这些参数调用createRpcInvocationMessage()
+	 *    方法创建RpcInvocationMessage。
+	 * 2. 判断被调用的方法返回值是否为Void类型，如果是则直接调用tell(rpcInvocation)方法，Akka中的tell()方法是没有返回值的。
+	 * 3. 如果被调用方法返回非Void类型，就会调用ask(rpcInvocation, futureTimeout)方法创建CompletableFuture，并判断CompletableFuture中的对象是否可以序列化，
+	 *    如果不能有效序列化则抛出异常。
+	 * 4. 判断方法返回的returnType是否和CompletableFuture类型一致，如果是则将返回的结果设置为CompletableFuture，说明接口本身就是异步的，即返回值为CompletableFuture。
+	 * 5. 如果returnType不为CompletableFuture类型，则调用CompletableFuture.get()方法同步获取返回结果。
 	 */
 	private Object invokeRpc(Method method, Object[] args) throws Exception {
 		String methodName = method.getName();
 		Class<?>[] parameterTypes = method.getParameterTypes();
 		Annotation[][] parameterAnnotations = method.getParameterAnnotations();
 		Time futureTimeout = extractRpcTimeout(parameterAnnotations, args, timeout);
-
+		// 创建RpcInvocation
 		final RpcInvocation rpcInvocation = createRpcInvocationMessage(methodName, parameterTypes, args);
 
 		Class<?> returnType = method.getReturnType();
 
 		final Object result;
-
+		// 如果方法返回类型为void，则直接调用tell(rpcInvocation)方法
 		if (Objects.equals(returnType, Void.TYPE)) {
 			tell(rpcInvocation);
 
 			result = null;
 		} else {
 			// execute an asynchronous call
+			// 否则调用Ask，执行异步调用
 			CompletableFuture<?> resultFuture = ask(rpcInvocation, futureTimeout);
-
+			// 对返回的数据进行处理，反序列化处理成Object类型数据并返回
 			CompletableFuture<?> completableFuture = resultFuture.thenApply((Object o) -> {
 				if (o instanceof SerializedValue) {
 					try {
@@ -224,11 +233,12 @@ class AkkaInvocationHandler implements InvocationHandler, AkkaBasedEndpoint, Rpc
 					return o;
 				}
 			});
-
+			// 如果返回接口和方法的returnType一致，则直接返回
 			if (Objects.equals(returnType, CompletableFuture.class)) {
 				result = completableFuture;
 			} else {
 				try {
+					// 否则调用completableFuture.get()方法同步获取返回结果
 					result = completableFuture.get(futureTimeout.getSize(), futureTimeout.getUnit());
 				} catch (ExecutionException ee) {
 					throw new RpcException("Failure while obtaining synchronous RPC result.", ExceptionUtils.stripExecutionException(ee));
@@ -255,12 +265,14 @@ class AkkaInvocationHandler implements InvocationHandler, AkkaBasedEndpoint, Rpc
 		final RpcInvocation rpcInvocation;
 
 		if (isLocal) {
+			// 创建LocalRpcInvocation
 			rpcInvocation = new LocalRpcInvocation(
 				methodName,
 				parameterTypes,
 				args);
 		} else {
 			try {
+				// 创建RemoteRpcInvocation
 				RemoteRpcInvocation remoteRpcInvocation = new RemoteRpcInvocation(
 					methodName,
 					parameterTypes,

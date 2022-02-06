@@ -128,6 +128,11 @@ public abstract class RetryingRegistration<F extends Serializable, G extends Rpc
 	/**
 	 * This method resolves the target address to a callable gateway and starts the
 	 * registration after that.
+	 * 1. 根据targetType获取具体的Gateway接口，targetType主要有FencedRpcGateway和RpcGateway两种类型，如果是FencedRpcGateway接口，则会调用
+	 *    rpcService.connect()方法传递fencingToken和FencedRpcGateway信息，最后创建FencedRpcGateway代理类，反之则仅创建RpcGateway代理类。
+	 * 2. 创建RpcGateway代理类后，就可以连接到指定的RpcEndpoint了，对于rpcService.connect()方法的定义。
+	 * 3. 创建RPC连接后，参数注册操作，主要是调用RetryingRegistration.register()私有方法，该方法会调用子类实现的invokeRegistration()注册方法。
+	 * 4. 如果注册失败，则进行Retry操作，除非接收到取消操作的消息。
 	 */
 	@SuppressWarnings("unchecked")
 	public void startRegistration() {
@@ -139,7 +144,7 @@ public abstract class RetryingRegistration<F extends Serializable, G extends Rpc
 		try {
 			// trigger resolution of the target address to a callable gateway
 			final CompletableFuture<G> rpcGatewayFuture;
-
+			// 根据不同的targetType，选择FencedRpcGateway还是普通的RpcGateway
 			if (FencedRpcGateway.class.isAssignableFrom(targetType)) {
 				rpcGatewayFuture = (CompletableFuture<G>) rpcService.connect(
 					targetAddress,
@@ -150,6 +155,7 @@ public abstract class RetryingRegistration<F extends Serializable, G extends Rpc
 			}
 
 			// upon success, start the registration attempts
+			// 成功获取网关后，尝试注册操作。
 			CompletableFuture<Void> rpcGatewayAcceptFuture = rpcGatewayFuture.thenAcceptAsync(
 				(G rpcGateway) -> {
 					log.info("Resolved {} address, beginning registration", targetName);
@@ -158,6 +164,7 @@ public abstract class RetryingRegistration<F extends Serializable, G extends Rpc
 				rpcService.getExecutor());
 
 			// upon failure, retry, unless this is cancelled
+			// 如果失败，则进行retry操作，除非取消操作。
 			rpcGatewayAcceptFuture.whenCompleteAsync(
 				(Void v, Throwable failure) -> {
 					if (failure != null && !canceled) {

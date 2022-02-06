@@ -238,6 +238,14 @@ class AkkaRpcActor<T extends RpcEndpoint & RpcGateway> extends AbstractActor {
 	 * to the sender of the call.
 	 *
 	 * @param rpcInvocation Rpc invocation message
+	 * 1. 从RpcInvocation对象汇总获取调用的methodName以及相应的paramTypes参数信息，然后调用lookupRpcMethod()方法判断当前的rpcEndpoint是否实现了
+	 *    指定的Method名称，例如JobMaster调用ResourceManagerGatew.requestSlot()方法，会在lookupRpcMethod()方法中判断当前ResourceManager实现的
+	 *    Endpoint是否提供了该方法的实现。
+	 * 2. 当rpcMethod不为空时，首先调用rpcMethod.setAccessible(true)支持匿名类的定义操作，然后判断rpcMethod返回类型是否为Void,如果是则调用
+	 *    rpcMethod.invoke(rpcEndpoint, rpcInvocation.getArgs())触发执行方法，此时不会返回任何返回值。
+	 * 3. 如果rpcMethod返回类型非Void,则会调用rpcMethod.invoke()触发调用和执行方法，同时获取方法的返回值并赋值给Object result对象。
+	 * 4. 判断result是否为CompletableFuture类型，如果是则将返回结果转换为CompletableFuture对象，然后调用sendAsyncResponse()方法通过Akka系统将RpcMethod
+	 *    返回值返回给调用方。
 	 */
 	private void handleRpcInvocation(RpcInvocation rpcInvocation) {
 		Method rpcMethod = null;

@@ -90,6 +90,8 @@ public interface RpcService {
 	 * @param rpcEndpoint Rpc protocol to dispatch the rpcs to
 	 * @param <C> Type of the rpc endpoint
 	 * @return Self gateway to dispatch remote procedure calls to oneself
+	 * 用于启动RpcEndpoint中的RpcServer。RpcServer实际上就是对Actor进行封装，启动完成后，RPCEndpoint中的
+	 * RpcServer就能够对外提供服务了。
 	 */
 	<C extends RpcEndpoint & RpcGateway> RpcServer startServer(C rpcEndpoint);
 
@@ -194,6 +196,7 @@ public interface RpcService {
 	 * @param callable to execute
 	 * @param <T> is the return value type
 	 * @return Future containing the callable's future result
+	 * 用于连接远端RpcEndpoint并返回给调用方RpcGateway接口的代理类，RPC客户端就能像本地一样调用RpcServer提供的RpcGateway接口了。
 	 */
 	<T> CompletableFuture<T> execute(Callable<T> callable);
 }

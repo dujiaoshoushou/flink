@@ -406,6 +406,7 @@ public abstract class ResourceManager<WorkerType extends ResourceIDRetrievable>
 					if (throwable != null) {
 						return new RegistrationResponse.Decline(throwable.getMessage());
 					} else {
+						// TODO 这里是重点方法，注册成功TaskExecutor并进行心跳监控。
 						return registerTaskExecutorInternal(taskExecutorGateway, taskExecutorRegistration);
 					}
 				} else {

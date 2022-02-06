@@ -189,11 +189,28 @@ public class AkkaRpcService implements RpcService {
 			});
 	}
 
+	/**
+	 * 1. 根据RpcEndpoint是否为FencedRpcEndpoint创建akkaRpcActorProps对象，用于通过actorSystem创建相应的Actor的ActorRef引用类。
+	 *    例如：FencedRpcEndpoint会使用FencedAkkaRpcActor创建akkaRpcActorProps配置类。
+	 * 2. 根据akkaRpcActorProps的配置信息创建ActorRef实例，这里调用了 actorSystem.actorOf(akkaRpcActorProps, rpcEndpoint.getEndpointId())方法
+	 *    创建指定akkaRpcActor的ActotRef对象，创建完毕后会将RpcEndpoint和ActorRef信息存储在Actor键值对集合中。
+	 * 3. 启动RpcEndpoint对应的RPC服务，首先获取当前RpcEndpoint实现的RpcGateways接口。其中包括默认的RpcGateway接口，如果RpcServer、AkkaBasedEndpoint，
+	 *    还有RpcEndpoint各个实现类自身的RpcGateway接口。RpcGateway接口最终通过RpcUtils.extractImplementedRpcGateways()方法从类定义抽取出来，例如
+	 *    JobMaster组件会抽取JobMasterGateway接口定义。
+	 * 4. 创建InvocationHandler代理类，事先定义动态代理类InvocationHandler，根据InvocationHandler代理类提供的invoke()方法实现被代理类的具体方法，处理
+	 *    本地Runnable线程和远程由Akka系统创建的RpcInvocationMessage消息类对应的方法。
+	 * 5. 根据RpcEndpoint是否为FencedRpcEndpoint，InvocationHandler分为FencedAkkaInvocationHandler和AkkaInvocationHandler两种类型。
+	 *    FencedAkkaInvocationHandler代理的接口主要有FencedMainThreadExecutable, FencedRpcGateway两种。
+	 *    AkkaInvocationHandler主要代理实现InvocationHandler, AkkaBasedEndpoint, RpcServer, StartStoppable, MainThreadExecutable, RpcGateway等接口。
+	 * 6. 创建好InvocationHandler代理类后，将当前类的ClassLoader、InvocationHandler实例以及implementedRpcGateways等参数传递到Proxy.newProxyInstance()方法
+	 *    中，通过反射的反射创建代理类。创建的代理类会被转换为RpcServer实例，在返回给RpcEndpoint使用。
+	 */
 	@Override
 	public <C extends RpcEndpoint & RpcGateway> RpcServer startServer(C rpcEndpoint) {
 		checkNotNull(rpcEndpoint, "rpc endpoint");
 
 		CompletableFuture<Void> terminationFuture = new CompletableFuture<>();
+		// 根据RpcEndpoint类型创建不同类型的Prop
 		final Props akkaRpcActorProps;
 
 		if (rpcEndpoint instanceof FencedRpcEndpoint) {
@@ -211,7 +228,7 @@ public class AkkaRpcService implements RpcService {
 				getVersion(),
 				configuration.getMaximumFramesize());
 		}
-
+		// 同步块，创建Actor并获取对应的ActorRef
 		ActorRef actorRef;
 
 		synchronized (lock) {
@@ -219,9 +236,9 @@ public class AkkaRpcService implements RpcService {
 			actorRef = actorSystem.actorOf(akkaRpcActorProps, rpcEndpoint.getEndpointId());
 			actors.put(actorRef, rpcEndpoint);
 		}
-
+        // 启动RpcEndpoint对应的RPC服务
 		LOG.info("Starting RPC endpoint for {} at {} .", rpcEndpoint.getClass().getName(), actorRef.path());
-
+		// 获取Actor的路径
 		final String akkaAddress = AkkaUtils.getAkkaURL(actorSystem, actorRef);
 		final String hostname;
 		Option<String> host = actorRef.path().address().host();
@@ -230,12 +247,12 @@ public class AkkaRpcService implements RpcService {
 		} else {
 			hostname = host.get();
 		}
-
+		// 解析RpcEndpoint实现的所有RpcGateway接口
 		Set<Class<?>> implementedRpcGateways = new HashSet<>(RpcUtils.extractImplementedRpcGateways(rpcEndpoint.getClass()));
-
+		// 额外添加RpcServer和AkkaBasedEndpoint类
 		implementedRpcGateways.add(RpcServer.class);
 		implementedRpcGateways.add(AkkaBasedEndpoint.class);
-
+		// 根据不同的RpcEndpoint类型动态创建代理对象
 		final InvocationHandler akkaInvocationHandler;
 
 		if (rpcEndpoint instanceof FencedRpcEndpoint) {
@@ -263,6 +280,7 @@ public class AkkaRpcService implements RpcService {
 		// Rather than using the System ClassLoader directly, we derive the ClassLoader
 		// from this class . That works better in cases where Flink runs embedded and all Flink
 		// code is loaded dynamically (for example from an OSGI bundle) through a custom ClassLoader
+		// 生成RpcServer对象，然后对该服务的调用都会进入Handler的invoke()方法中处理，Handler实现了多个接口的方法。
 		ClassLoader classLoader = getClass().getClassLoader();
 
 		@SuppressWarnings("unchecked")
@@ -429,6 +447,17 @@ public class AkkaRpcService implements RpcService {
 		return Tuple2.of(actorAddress, hostname);
 	}
 
+	/**
+	 * 内部连接rpc各个组件方法
+	 * 1. 根据指定的Address调用actorSystem.actorSelection(address)方法创建ActorSelection实例，使用ActorSelection对象向该路径指向Actor对象发送消息。
+	 * 2. 调用Patterns.ask()方法，向ActorSelection指定的路径发送Identity消息。
+	 * 3. 调用FutureUtils.toJava()方法，将Scala类型的Future对象转换成java CompletableFuture对象。
+	 * 4. 通过idengtifyFuture获取actorRefFuture对象，并从中获取ActorRef引用对象。
+	 * 5. 调用Patterns.ask()方法，向actorRef对应的RpcEndpoint节点发送RemoteHandshakeMessage消息，确保连接的RpcEndpoint节点正常，如果成功，则RpcEndpoint
+	 *    会返回HandshakeSuccessMessage消息。
+	 * 6. 调用invocationHandlerFactory创建invocationHandler动态代理类，此时可以看到传递的接口列表为new Class<?>[]{clazz}，也就是当前RpcEndpoint需要访问的
+	 *    RpcGateway接口，例如JobMaster访问RsourceManager时，这里就是ResourceManagerGateway接口。
+	 */
 	private <C extends RpcGateway> CompletableFuture<C> connectInternal(
 			final String address,
 			final Class<C> clazz,
@@ -437,15 +466,15 @@ public class AkkaRpcService implements RpcService {
 
 		LOG.debug("Try to connect to remote RPC endpoint with address {}. Returning a {} gateway.",
 			address, clazz.getName());
-
+		// 根据Address创建ActorSelection
 		final ActorSelection actorSel = actorSystem.actorSelection(address);
-
+		// 调用Patterns.ask()方法创建ActorIdentity对象
 		final Future<ActorIdentity> identify = Patterns
 			.ask(actorSel, new Identify(42), configuration.getTimeout().toMilliseconds())
 			.<ActorIdentity>mapTo(ClassTag$.MODULE$.<ActorIdentity>apply(ActorIdentity.class));
-
+		// 将identify对象转换为Java CompletableFuture类型对象
 		final CompletableFuture<ActorIdentity> identifyFuture = FutureUtils.toJava(identify);
-
+		// 从identifyFuture中获取ActorRef实例
 		final CompletableFuture<ActorRef> actorRefFuture = identifyFuture.thenApply(
 			(ActorIdentity actorIdentity) -> {
 				if (actorIdentity.getRef() == null) {
@@ -454,7 +483,7 @@ public class AkkaRpcService implements RpcService {
 					return actorIdentity.getRef();
 				}
 			});
-
+		// 进行handshake操作，确保需要连接的RpcEndpoint节点正常
 		final CompletableFuture<HandshakeSuccessMessage> handshakeFuture = actorRefFuture.thenCompose(
 			(ActorRef actorRef) -> FutureUtils.toJava(
 				Patterns
@@ -470,7 +499,7 @@ public class AkkaRpcService implements RpcService {
 				// from this class . That works better in cases where Flink runs embedded and all Flink
 				// code is loaded dynamically (for example from an OSGI bundle) through a custom ClassLoader
 				ClassLoader classLoader = getClass().getClassLoader();
-
+				// 创建RPC动态代理类
 				@SuppressWarnings("unchecked")
 				C proxy = (C) Proxy.newProxyInstance(
 					classLoader,

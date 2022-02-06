@@ -89,13 +89,14 @@ public abstract class RegisteredRpcConnection<F extends Serializable, G extends 
 	public void start() {
 		checkState(!closed, "The RPC connection is already closed");
 		checkState(!isConnected() && pendingRegistration == null, "The RPC connection is already started");
-
+		// 创建RetryingRegistration
 		final RetryingRegistration<F, G, S> newRegistration = createNewRegistration();
-
+		// 启动RetryingRegistration
 		if (REGISTRATION_UPDATER.compareAndSet(this, null, newRegistration)) {
 			newRegistration.startRegistration();
 		} else {
 			// concurrent start operation
+			// 并行启动后，直接取消当前RetryingRegistration
 			newRegistration.cancel();
 		}
 	}
