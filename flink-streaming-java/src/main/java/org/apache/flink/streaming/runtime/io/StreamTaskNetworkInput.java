@@ -121,6 +121,21 @@ public final class StreamTaskNetworkInput<T> implements StreamTaskInput<T> {
 	 * 5. 如果获取结果中的Buffer已经被消费，则对Buffer数据占用的内存空间进行回收。
 	 * 6. 如果获取结果是完整的Record记录，则调用processElement()方法对数据元素进行处理。
 	 * 7. 处理完毕后退出循环并返回MORE_AVAILAVLE状态，继续等待新的数据接入。
+	 *
+	 * 第7章节，详细逻辑如下：
+	 * 1. 启动一个While(true)循环并根据指定条件退出循环。
+	 * 2. 判断currentRecordDeserializer是否为空，如果不为空，表明currentRecordDeserializer对象中已经含有反序列化的数据元素，此时会优先从中获取反序列化的数据元素，
+	 *    并返回DeserializationResult表示数据元素的消费情况。
+	 * 3. 如果DeserializationResult中显示Buffer已经消费完，则对Buffer内存空间进行回收，本缓冲区中的数据元素都会通过Buffer结构以二进制的格式进行存储。
+	 * 4. 判断DeserializationResult是否消费了完成的Record，如果是则表明当前反序列化的Buffer数据是一个完整的数据元素。接着调用processElement()方法对该数据元素继续进行
+	 *    处理，并返回InputStatus.MORE_AVAILABLE状态，表示管道中还有更多的数据元素可以继续处理。
+	 * 5. 当数据还没有接入调度时候，currentRecordDeserializer对象为空，此时会跳过上面的逻辑，从InputGate中拉取新的Buffer数据，并调用processBufferOrEvent()方法
+	 *    将接收到的Buffer数据写入currentRecordDeserializer。
+	 * 6. 调用checkpointedInputGate.pollNext()方法从InputGate中拉取新的BufferOrEvent数据，BufferOrEvent代表数据元素可以是Buffer类型，也可以是事件类型，
+	 *    比如CheckpointBarrier、TaskEvent等事件。
+	 * 7. bufferOrEvent不为空的时候，会调用processBufferOrEvent()进行处理，此时如果是Buffer类型的数据则进行反序列化操作，将接收到的二进制数据存储到currentRecordDeserializer中，
+	 *    再从currentRecordDeserializer对象汇总获取数据元素。对于事件数据则直接执行相应类型事件的操作。
+	 * 8. 如果bufferOrEvent为空，则判断checkpointedInputGate是否已经关闭，如果已经关闭了则直接返回END_OF_INPUT状态，否则返回NOTHING_AVAILABLE状态。
 	 */
 	@Override
 	public InputStatus emitNext(DataOutput<T> output) throws Exception {

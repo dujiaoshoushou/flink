@@ -83,18 +83,31 @@ public class OneInputStreamTask<IN, OUT> extends StreamTask<OUT, OneInputStreamO
 		super(env, timeProvider);
 	}
 
+	/**
+	 * 构建StreamInputProcessor并最终通过StreamInputProcessor处理数据
+	 * @throws Exception
+	 * 1. 在OneInputStreamTask中创建CheckpointedInputGate，实际上是对InputGate进行封装，实现对Checkpoint Barrier对齐的功能。
+	 *    通过CheckpointedInputGate可以接入上游Task实例写入指定InputChannel中的Buffer数据。
+	 * 2. 创建DataOutput组件，在StreamTaskInput中会将接入的数据通过DataOutput组件输出到算子链的HeadOperator中。
+	 * 3. 创建StreamTaskInput组件用于接收数据，将InputGate和DataOutput作为内部成员，完成对数据的接入和输出。
+	 * 4. 创建StreamOneInputProcessor数据处理器，StreamOneInputProcessor会被Task线程模型调度并执行，实现周期性地从StreamTaskInput
+	 *    组件中读取数据数据元素并处理。
+	 */
 	@Override
 	public void init() throws Exception {
 		StreamConfig configuration = getConfiguration();
 		int numberOfInputs = configuration.getNumberOfInputs();
 
 		if (numberOfInputs > 0) {
+			// 创建CheckpointedInputGate
 			CheckpointedInputGate inputGate = createCheckpointedInputGate();
 			TaskIOMetricGroup taskIOMetricGroup = getEnvironment().getMetricGroup().getIOMetricGroup();
 			taskIOMetricGroup.gauge("checkpointAlignmentTime", inputGate::getAlignmentDurationNanos);
-
+			// 创建组件DataOutput
 			DataOutput<IN> output = createDataOutput();
+			// 创建组件StreamTaskInput
 			StreamTaskInput<IN> input = createTaskInput(inputGate, output);
+			// 创建StreamOneInputProcessor
 			inputProcessor = new StreamOneInputProcessor<>(
 				input,
 				output,

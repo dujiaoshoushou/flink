@@ -335,12 +335,13 @@ public class SlotPoolImpl implements SlotPool {
 	 * 向ResourceManager申请Slot资源
 	 *
 	 * @param resourceManagerGateway
-	 * @param pendingRequest         1. 检查resourceManagerGateway和pendingRequest是否非空。
-	 *                               2. 创建AllocationID，用于标记资源，让后将pendingRequest存储在pendingRequests集合中
-	 *                               3. 调用pendingRequest.getAllocatedSlotFuture()方法，等待获取Slot资源分配的结果，如果分配过程中出现异常，则会取消Slot资源申请。
-	 *                               4. 通过resourceManagerGateway向ResourceManager请求指定的Slot资源，此时resourceManagerGateway会返回Acknowledge信息，
-	 *                               根据返回的Acknowledge判断Slot资源是否申请成功。
-	 *                               5. 如果申请失败，就会调用slotRequestToResourceManagerFailed()方法处理异常，如果没有异常，则表示申请Slot资源成功。
+	 * @param pendingRequest
+	 * 1. 检查resourceManagerGateway和pendingRequest是否非空。
+	 * 2. 创建AllocationID，用于标记资源，让后将pendingRequest存储在pendingRequests集合中
+	 * 3. 调用pendingRequest.getAllocatedSlotFuture()方法，等待获取Slot资源分配的结果，如果分配过程中出现异常，则会取消Slot资源申请。
+	 * 4. 通过resourceManagerGateway向ResourceManager请求指定的Slot资源，此时resourceManagerGateway会返回Acknowledge信息，
+	 *    根据返回的Acknowledge判断Slot资源是否申请成功。
+	 * 5. 如果申请失败，就会调用slotRequestToResourceManagerFailed()方法处理异常，如果没有异常，则表示申请Slot资源成功。
 	 */
 	private void requestSlotFromResourceManager(
 		final ResourceManagerGateway resourceManagerGateway,
