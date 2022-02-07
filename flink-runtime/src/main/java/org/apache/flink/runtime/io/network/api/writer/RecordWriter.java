@@ -109,11 +109,13 @@ public abstract class RecordWriter<T extends IOReadableWritable> implements Avai
 
 	protected void emit(T record, int targetChannel) throws IOException, InterruptedException {
 		checkErroneous();
-
+		// 数据序列化
 		serializer.serializeRecord(record);
 
 		// Make sure we don't hold onto the large intermediate serialization buffer for too long
+		// 将序列化器中的数据复制到指定分区中
 		if (copyFromSerializerToTargetChannel(targetChannel)) {
+			// 清空序列化器
 			serializer.prune();
 		}
 	}
@@ -121,32 +123,47 @@ public abstract class RecordWriter<T extends IOReadableWritable> implements Avai
 	/**
 	 * @param targetChannel
 	 * @return <tt>true</tt> if the intermediate serialization buffer should be pruned
+	 * 1. 对序列化器进行Reset操作，重置初始化位置。
+	 * 2. 调用getBufferBuilder(targetChannel)方法，获取指定分区的BufferBuilder对象。BufferBuilder用于构建完整的Buffer数据，
+	 *    将序列化器中的二进制数据写入BufferBuilder，即通过ByteBuffer中间数据构建完整的Buffer数据集。
+	 * 3. 调用serializer.copyToBufferBuilder(bufferBuilder)方法，将序列化器的ByteBuffer中间数据写入BufferBuiler。
+	 * 4. 通过返回的SerializationResult判断当前BufferBuilder是否构建了完整的Buffer数据，如果是则调用finishBufferBuilder(bufferBuilder)方法完成
+	 *    BufferBuilder中的Buffer的构建。
+	 * 5. 判断SerializationResult中是否具有完整的数据元素，如果是则将pruneTriggered置为True，然后清空当前的BufferBuilder，最后跳出循环。
+	 * 6. 创建新的bufferBuilder，继续从序列化器中将中间数据复制到BufferBuilder中。
+	 * 7. 指定flushAlways参数为True，调用flushTargetPartition()方法将数据写入ResultPartition。为防止过渡频繁地将数据写入ResultPartition，在RecordWriter
+	 *    中会有独立的outputFlusher线程，周期性地将构建出来的Buffer数据推送到ResultPartition本地队列中存储，默认延迟为100ms。
 	 */
 	protected boolean copyFromSerializerToTargetChannel(int targetChannel) throws IOException, InterruptedException {
 		// We should reset the initial position of the intermediate serialization buffer before
 		// copying, so the serialization results can be copied to multiple target buffers.
+		// 对序列化器进行Reset操作，初始化initial position
 		serializer.reset();
-
+		// 创建BufferBuilder
 		boolean pruneTriggered = false;
 		BufferBuilder bufferBuilder = getBufferBuilder(targetChannel);
+		// 调用序列化器将数据写入BufferBuilder
 		SerializationResult result = serializer.copyToBufferBuilder(bufferBuilder);
+		// 如果SerializeationResult是完整Buffer
 		while (result.isFullBuffer()) {
+			// 则完成创建Buffer数据的操作
 			finishBufferBuilder(bufferBuilder);
 
 			// If this was a full record, we are done. Not breaking out of the loop at this point
 			// will lead to another buffer request before breaking out (that would not be a
 			// problem per se, but it can lead to stalls in the pipeline).
+			// 如果是完整记录，则将pruneTriggered置为true
 			if (result.isFullRecord()) {
 				pruneTriggered = true;
 				emptyCurrentBufferBuilder(targetChannel);
 				break;
 			}
-
+			// 创建性的bufferBuilder，继续复制序列化器中的数据到BufferBuilder中
 			bufferBuilder = requestNewBufferBuilder(targetChannel);
 			result = serializer.copyToBufferBuilder(bufferBuilder);
 		}
 		checkState(!serializer.hasSerializedData(), "All data should be written at once");
-
+		// 如果指定的flushAlways，则直接调用flushTargetPartition将数据写入ResultPartition
 		if (flushAlways) {
 			flushTargetPartition(targetChannel);
 		}

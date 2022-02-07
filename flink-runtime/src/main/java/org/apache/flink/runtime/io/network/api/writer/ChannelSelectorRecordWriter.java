@@ -99,9 +99,11 @@ public final class ChannelSelectorRecordWriter<T extends IOReadableWritable> ext
 	@Override
 	public BufferBuilder requestNewBufferBuilder(int targetChannel) throws IOException, InterruptedException {
 		checkState(bufferBuilders[targetChannel] == null || bufferBuilders[targetChannel].isFinished());
-
+		// 调用targetPartition获取BufferBuilder
 		BufferBuilder bufferBuilder = targetPartition.getBufferBuilder();
+		// 向targetPartition中添加BufferConsumer
 		targetPartition.addBufferConsumer(bufferBuilder.createBufferConsumer(), targetChannel);
+		// 将创建好的bufferBuilder添加至数据
 		bufferBuilders[targetChannel] = bufferBuilder;
 		return bufferBuilder;
 	}

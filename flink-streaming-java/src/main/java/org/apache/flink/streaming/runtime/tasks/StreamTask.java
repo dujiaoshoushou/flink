@@ -1548,10 +1548,13 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 	private static <OUT> List<RecordWriter<SerializationDelegate<StreamRecord<OUT>>>> createRecordWriters(
 			StreamConfig configuration,
 			Environment environment) {
+		// 参加RecordWriter集合
 		List<RecordWriter<SerializationDelegate<StreamRecord<OUT>>>> recordWriters = new ArrayList<>();
+		// 获取输出的StreamEdge
 		List<StreamEdge> outEdgesInOrder = configuration.getOutEdgesInOrder(environment.getUserClassLoader());
+		// 获取chainedConfig是参数
 		Map<Integer, StreamConfig> chainedConfigs = configuration.getTransitiveChainedTaskConfigsWithSelf(environment.getUserClassLoader());
-
+		// 遍历输出节点，分别创建RecordWriter实例
 		for (int i = 0; i < outEdgesInOrder.size(); i++) {
 			StreamEdge edge = outEdgesInOrder.get(i);
 			recordWriters.add(
@@ -1565,32 +1568,46 @@ public abstract class StreamTask<OUT, OP extends StreamOperator<OUT>>
 		return recordWriters;
 	}
 
+	/**
+	 * 1. 获取当前StreamEdge内部对应的StreamPartitioner实现类，DataStream物理分区操作所创建的StreamPartitioner分区策略会被应用在RecordWriter中，
+	 *    例如DataStream.rebalance()操作就会创建RebalancePartitioner作为StreamPartitioner的实现类，并通过RebalancePartitioner选择下游InputChannel，
+	 *    实现数据元素按照指定的分区策略下发。
+	 * 2. 从环境信息中获取已创建的ResultPartitionWriter组件，即ResultPartition。ResultPartition内部会在本地存储需要下发的Buffer数据，并等待下游节点向上游节点
+	 *    发送数据消费请求。
+	 * 3. 如果StreamPartitoner为ConfigurableStreamPartitioner实现类，会从ResultPartition中获取numKeyGroups，向StreamPartition配置ResultPartition中
+	 *    KeyGroup的数量，完成对StreamPartition的初始化操作。
+	 * 4. 通过RecordWriterBuilder创建RecordWriter，在创建过程中会设定outputPartitioner、bufferTimeout以及bufferWriter等参数。
+	 * 5. 最后为RecordWriter设定MetricGroup，用于监控指标的采集和输出。
+	 */
 	private static <OUT> RecordWriter<SerializationDelegate<StreamRecord<OUT>>> createRecordWriter(
 			StreamEdge edge,
 			int outputIndex,
 			Environment environment,
 			String taskName,
 			long bufferTimeout) {
+		// 获取边上的StreamPartitioner
 		@SuppressWarnings("unchecked")
 		StreamPartitioner<OUT> outputPartitioner = (StreamPartitioner<OUT>) edge.getPartitioner();
 
 		LOG.debug("Using partitioner {} for output {} of task {}", outputPartitioner, outputIndex, taskName);
-
+		// 获取ResultPartitionWriter
 		ResultPartitionWriter bufferWriter = environment.getWriter(outputIndex);
 
 		// we initialize the partitioner here with the number of key groups (aka max. parallelism)
+		// 初始化Partitioner
 		if (outputPartitioner instanceof ConfigurableStreamPartitioner) {
 			int numKeyGroups = bufferWriter.getNumTargetKeyGroups();
 			if (0 < numKeyGroups) {
 				((ConfigurableStreamPartitioner) outputPartitioner).configure(numKeyGroups);
 			}
 		}
-
+		// 创建RecordWriter
 		RecordWriter<SerializationDelegate<StreamRecord<OUT>>> output = new RecordWriterBuilder<SerializationDelegate<StreamRecord<OUT>>>()
 			.setChannelSelector(outputPartitioner)
 			.setTimeout(bufferTimeout)
 			.setTaskName(taskName)
 			.build(bufferWriter);
+		// 设定MetricGroup监控
 		output.setMetricGroup(environment.getMetricGroup().getIOMetricGroup());
 		return output;
 	}

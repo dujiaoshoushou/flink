@@ -54,6 +54,13 @@ public class SpanningRecordSerializer<T extends IOReadableWritable> implements R
 	 * Serializes the complete record to an intermediate data serialization buffer.
 	 *
 	 * @param record the record to serialize
+	 * 1. 清理serializationBuffer的中间数据，实际上就是将byte[]数据的position参数置为0.
+	 * 2. 调用serializationBuffer.skipBytesToWrite(4)方法设定serialization buffer的初始容量，默认不小于4.
+	 * 3. 将数据元素写入serializationBuffer的bytes[]数组，所有数据元素都实现了IOReadableWritable接口，可以直接将数据对象
+	 *    转换为二进制格式。
+	 * 4. 获取serializationBuffer的长度信息，并写入serializationBuffer。
+	 * 5. 调用serializationBuffer.wrapAsByteBuffer()方法将serializationBuffer中的byte[]数据封装为java.io.ByteBuffer
+	 *               数据结构，最终赋值到dataBuffer的中间结果中。
 	 */
 	@Override
 	public void serializeRecord(T record) throws IOException {
@@ -62,19 +69,21 @@ public class SpanningRecordSerializer<T extends IOReadableWritable> implements R
 				throw new IllegalStateException("Pending serialization of previous record.");
 			}
 		}
-
+		// 首先清理serializationBuffer
 		serializationBuffer.clear();
 		// the initial capacity of the serialization buffer should be no less than 4
+		// 设定serialization buffer 数量
 		serializationBuffer.skipBytesToWrite(4);
 
 		// write data and length
+		// 将record数据写入serializationBuffer
 		record.write(serializationBuffer);
-
+		// 获取serializationBuffer的长度信息并记录到serializationBuffer对象中
 		int len = serializationBuffer.length() - 4;
 		serializationBuffer.setPosition(0);
 		serializationBuffer.writeInt(len);
 		serializationBuffer.skipBytesToWrite(len);
-
+		// 对serializationBuffer进行wrapp处理，转换成ByteBuffer数据结构
 		dataBuffer = serializationBuffer.wrapAsByteBuffer();
 	}
 

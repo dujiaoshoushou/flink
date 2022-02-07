@@ -105,20 +105,34 @@ public class OperatorChain<OUT, OP extends StreamOperator<OUT>> implements Strea
 	 */
 	private StreamStatus streamStatus = StreamStatus.ACTIVE;
 
+	/**
+	 * 1. 获取StreamTask的userCodeClassLoader以及StreamConfig
+	 * 2. 获取StreamOperatorFactory用于创建StreamOperator实例，StreamOperator会封装StreamOperatorFactory并存储在StreamGraph结构中，
+	 *    而这里就会从userCodeClassLoader解析定义的StreamOperatorFactory实例，再通过StreamOperatorFactory创建相应的算子实例。
+	 * 3. 从configuration中读取chainedConfigs，即算子之间的链接配置。chainedConfigs的配置决定了算子之间Output接口的具体实现。
+	 * 4. 遍历outEdgesInOrder集合并创建StreamOutput配置，主要是根据StreamConfig获取当前作业所有节点的输出边，并按照顺序通过输出边构建
+	 *    RecordWriterOutput组件，最终通过RecordWriterOutput组件将数据元素输出到网络中。
+	 * 5. 除了构建StreamOutput之外，还需要创建OperatorChain内部算子之间的上下游连接，完成OperatorChain内部上下游算子之间的数据传输。
+	 * 6. 单独创建headOperator。headOperator是OperatorChain的头节点，创建完成后将headOperator暴露到StreamTask实例，供DataOutput接口实现类调用。
+	 * 7. 如果OperatorChain构建失败，则关闭已经创建的RecordWriterOutput实例，防止出现内存泄露。
+	 */
 	public OperatorChain(
 			StreamTask<OUT, OP> containingTask,
 			RecordWriterDelegate<SerializationDelegate<StreamRecord<OUT>>> recordWriterDelegate) {
-
+		// 获取当前StreamTask的userCodeClassLoader
 		final ClassLoader userCodeClassloader = containingTask.getUserCodeClassLoader();
+		// 获取StreamConfig
 		final StreamConfig configuration = containingTask.getConfiguration();
-
+		// 获取StreamOperatorFactory
 		StreamOperatorFactory<OUT> operatorFactory = configuration.getStreamOperatorFactory(userCodeClassloader);
 
 		// we read the chained configs, and the order of record writer registrations by output name
+		// 读取chainedConfigs配置
 		Map<Integer, StreamConfig> chainedConfigs = configuration.getTransitiveChainedTaskConfigsWithSelf(userCodeClassloader);
 
 		// create the final output stream writers
 		// we iterate through all the out edges from this job vertex and create a stream output
+		// 根据StreamEdge创建RecordWriterOutput组件
 		List<StreamEdge> outEdgesInOrder = configuration.getOutEdgesInOrder(userCodeClassloader);
 		Map<StreamEdge, RecordWriterOutput<?>> streamOutputMap = new HashMap<>(outEdgesInOrder.size());
 		this.streamOutputs = new RecordWriterOutput<?>[outEdgesInOrder.size()];
@@ -128,7 +142,7 @@ public class OperatorChain<OUT, OP extends StreamOperator<OUT>> implements Strea
 		try {
 			for (int i = 0; i < outEdgesInOrder.size(); i++) {
 				StreamEdge outEdge = outEdgesInOrder.get(i);
-
+				// 为每个输出边创建RecordWriterOutput
 				RecordWriterOutput<?> streamOutput = createStreamOutput(
 					recordWriterDelegate.getRecordWriter(i),
 					outEdge,
@@ -140,6 +154,7 @@ public class OperatorChain<OUT, OP extends StreamOperator<OUT>> implements Strea
 			}
 
 			// we create the chain of operators and grab the collector that leads into the chain
+			// 创建OperatorChain内部算子之间的连接
 			List<StreamOperator<?>> allOps = new ArrayList<>(chainedConfigs.size());
 			this.chainEntryPoint = createOutputCollector(
 				containingTask,
@@ -152,7 +167,7 @@ public class OperatorChain<OUT, OP extends StreamOperator<OUT>> implements Strea
 
 			if (operatorFactory != null) {
 				WatermarkGaugeExposingOutput<StreamRecord<OUT>> output = getChainEntryPoint();
-
+				// 创建headOperator
 				headOperator = StreamOperatorFactoryUtil.createOperator(
 						operatorFactory,
 						containingTask,
@@ -174,6 +189,7 @@ public class OperatorChain<OUT, OP extends StreamOperator<OUT>> implements Strea
 		finally {
 			// make sure we clean up after ourselves in case of a failure after acquiring
 			// the first resources
+			// 如果创建不成功，则关闭StreamOutputs中的RecordWriterOutput
 			if (!success) {
 				for (RecordWriterOutput<?> output : this.streamOutputs) {
 					if (output != null) {
@@ -450,24 +466,34 @@ public class OperatorChain<OUT, OP extends StreamOperator<OUT>> implements Strea
 		return currentOperatorOutput;
 	}
 
+	/**
+	 * 1. 获取OutputTag标签，判断当前Stream节点输出边是否为旁路输出，即在DataStream API中是否使用了旁路输出的相关方法。
+	 * 2. 当OutputTag标签不为空时，调用upStreamConfig.getTypeSerializerSideOut()方法，创建并获取OutputTag对应的TypeSerializer类型序列化器。
+	 *    否则调用upStreamConfig.getTypeSerializerOut()方法获取序列化器。
+	 * 3. 根据TypeSerializer等信息创建RecordWriterOutput实例并返回，在RecordWriterOutput中包含RecordWrite组件作为成员变量，最终会通过RecordWriter
+	 *    将算子链处理完成的数据写入网络。
+	 */
 	private RecordWriterOutput<OUT> createStreamOutput(
 			RecordWriter<SerializationDelegate<StreamRecord<OUT>>> recordWriter,
 			StreamEdge edge,
 			StreamConfig upStreamConfig,
 			Environment taskEnvironment) {
+		// 获取OutputTag
 		OutputTag sideOutputTag = edge.getOutputTag(); // OutputTag, return null if not sideOutput
-
+		// 获取数据序列化器TypeSerializer
 		TypeSerializer outSerializer = null;
-
+		// 如果StreamEdge指定了OutputTag
 		if (edge.getOutputTag() != null) {
 			// side output
+			// 则进行边路输出
 			outSerializer = upStreamConfig.getTypeSerializerSideOut(
 					edge.getOutputTag(), taskEnvironment.getUserClassLoader());
 		} else {
 			// main output
+			// 正常输出
 			outSerializer = upStreamConfig.getTypeSerializerOut(taskEnvironment.getUserClassLoader());
 		}
-
+		// 返回创建的RecordWriterOutput实例
 		return new RecordWriterOutput<>(recordWriter, outSerializer, sideOutputTag, this);
 	}
 

@@ -74,29 +74,30 @@ public class NettyShuffleServiceFactory implements ShuffleServiceFactory<NettySh
 			ResourceID taskExecutorResourceId,
 			TaskEventPublisher taskEventPublisher,
 			MetricGroup metricGroup) {
+		// 检查参数都不能为空
 		checkNotNull(config);
 		checkNotNull(taskExecutorResourceId);
 		checkNotNull(taskEventPublisher);
 		checkNotNull(metricGroup);
-
+		// 获取netty相关的配置参数
 		NettyConfig nettyConfig = config.nettyConfig();
-
+		// 创建ResultPartitionManager实例
 		ResultPartitionManager resultPartitionManager = new ResultPartitionManager();
-
+		// 创建FileChannelManager实例
 		FileChannelManager fileChannelManager = new FileChannelManagerImpl(config.getTempDirs(), DIR_NAME_PREFIX);
-
+		// 创建ConnectionManager实例
 		ConnectionManager connectionManager = nettyConfig != null ?
 			new NettyConnectionManager(resultPartitionManager, taskEventPublisher, nettyConfig) :
 			new LocalConnectionManager();
-
+		// 创建NetworkBufferPool实例
 		NetworkBufferPool networkBufferPool = new NetworkBufferPool(
 			config.numNetworkBuffers(),
 			config.networkBufferSize(),
 			config.networkBuffersPerChannel(),
 			config.getRequestSegmentsTimeout());
-
+		// 注册ShuffleMetrics信息
 		registerShuffleMetrics(metricGroup, networkBufferPool);
-
+		// 创建ResultPartitionFactory实例
 		ResultPartitionFactory resultPartitionFactory = new ResultPartitionFactory(
 			resultPartitionManager,
 			fileChannelManager,
@@ -108,7 +109,7 @@ public class NettyShuffleServiceFactory implements ShuffleServiceFactory<NettySh
 			config.isForcePartitionReleaseOnConsumption(),
 			config.isBlockingShuffleCompressionEnabled(),
 			config.getCompressionCodec());
-
+		// 创建SingleInputGateFactory实例
 		SingleInputGateFactory singleInputGateFactory = new SingleInputGateFactory(
 			taskExecutorResourceId,
 			config,
@@ -116,7 +117,7 @@ public class NettyShuffleServiceFactory implements ShuffleServiceFactory<NettySh
 			resultPartitionManager,
 			taskEventPublisher,
 			networkBufferPool);
-
+		// 最后返回NettyShuffleEnvironment
 		return new NettyShuffleEnvironment(
 			taskExecutorResourceId,
 			config,
