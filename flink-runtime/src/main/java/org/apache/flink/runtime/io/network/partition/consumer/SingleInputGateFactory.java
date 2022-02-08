@@ -105,6 +105,13 @@ public class SingleInputGateFactory {
 
 	/**
 	 * Creates an input gate and all of its input channels.
+	 * 1. 和创建ResultPartition的过程一样，在调用createBufferPoolFactory方法中会事先创建bufferPoolFactory（networkBufferPool），用于创建LocalBufferPool。
+	 *    通过LocalBufferPool可以为InputGate提供Buffer数据的存储空间，实现本地缓冲InputGate中的二进制数据。
+	 * 2. 如果igdd.getConsumedPartitionType().isBlocking()和blockingShuffleCompressionEnabled都为True，则创建bufferDecompressor，这里其实和ResultPartition中的
+	 *    BufferCompressor是对应的，即通过BufferDecompressor解压BufferCompressor压缩后的Buffer数据。
+	 * 3. 通过InputGateDeploymentDescriptor中的参数BufferCompressor和BufferPoolFactory创建SingleInputGate对象。
+	 * 4. 调用createInputChannels()方法创建SingleInputGate中的InputChannels。
+	 * 5. 将创建完成的inputGate返回给Task实例。
 	 */
 	public SingleInputGate create(
 			@Nonnull String owningTaskName,
@@ -137,6 +144,11 @@ public class SingleInputGateFactory {
 		return inputGate;
 	}
 
+	/**
+	 * 1. 从inputGateDeploymentDescriptor中获取ShuffleDescriptor列表，ShuffleDescriptor是在ShuffleMaster中创建和生成的，描述了数据生产者和ResultPartition等信息。
+	 * 2. 创建InputChannel[]数组，然后变量InputChannel[]数组，调用createInputChannel()方法创建InputChannel，最后将其存储到inputGate中。可以看出每个resultPartitionID
+	 *   对应一个InputChannel。
+	 */
 	private void createInputChannels(
 			String owningTaskName,
 			InputGateDeploymentDescriptor inputGateDeploymentDescriptor,
@@ -198,6 +210,15 @@ public class SingleInputGateFactory {
 					metrics));
 	}
 
+	/**
+	 * 1. 调用inputChannelDescriptor.getResultPartitionID()方法获取ResultPartitionID
+	 * 2. 调用inputChannelDescriptor.isLocalTo(taskExecutorResourceId)方法判断消费数据的Task实例和数据生产的Task实例是否运行在同一个TaskManager中。
+	 *    这一步主要是在判断producerLocation和consumerLocation是否相等，如果相等则说明上下游Task属于同一个TaskManager，创建的InputChannel就为LocalInputChannel，
+	 *    下游InputChannel不经过网络获取数据。
+	 * 3. 如果inputChannelDescriptor.isLocalTo(taskExecutorResourceId)返回false，则说明上下游Task不在同一个TaskManager中，此时创建基于Netty框架实现的
+	 *    RemoteInputChannel，帮助下游Task实例从网络中消费上游Task中的Buffer数据。
+	 *
+	 */
 	private InputChannel createKnownInputChannel(
 			SingleInputGate inputGate,
 			int index,
@@ -207,6 +228,7 @@ public class SingleInputGateFactory {
 		ResultPartitionID partitionId = inputChannelDescriptor.getResultPartitionID();
 		if (inputChannelDescriptor.isLocalTo(taskExecutorResourceId)) {
 			// Consuming task is deployed to the same TaskManager as the partition => local
+			// Task实例属于同一个TaskManager
 			channelStatistics.numLocalChannels++;
 			return new LocalInputChannel(
 				inputGate,
@@ -219,6 +241,7 @@ public class SingleInputGateFactory {
 				metrics);
 		} else {
 			// Different instances => remote
+			// Task实例不属于同一个TaskManager
 			channelStatistics.numRemoteChannels++;
 			return new RemoteInputChannel(
 				inputGate,

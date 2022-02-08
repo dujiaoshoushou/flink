@@ -68,6 +68,19 @@ public class NettyShuffleServiceFactory implements ShuffleServiceFactory<NettySh
 			shuffleEnvironmentContext.getParentMetricGroup());
 	}
 
+	/**
+	 * 1. 从NettyShuffleEnvironmentConfiguration参数中获取Netty相关配置，例如TransportType、InetAddress、serverPort以及numberOfSlots等信息。
+	 * 2. 创建ResultPartitionManager实例，注册和管理TaskManager中的ResultPartition信息，并提供创建ResultSubpartitionView方法，专门用与消费
+	 *    ResultSubPartiton中的Buffer的数据。
+	 * 3. 创建FileChannelManager实例，知道配置中的临时文件夹，然后创建并获取文件的FileChannel。对于离线类型的作业，会将数据写入文件信息，再对文件进行处理，
+	 *    这里的实现和MapReduce算法类型。
+	 * 4. 创建ConnectionManager实例，主要用于InputChannel组件。InputChannel会通过ConnectionManager创建PartitionRequestClient，实现和ResultPartition
+	 *    之间的网络连接。ConnectionManager会根据NettyConfig是否为空，选择创建NettyConnectionManager还是LocalConnectionManager。
+	 * 5. 创建NetworkBufferPool组件，用于向ResultPartition和InputGate组件提供Buffer内存存储空间，实际上就是分配和管理MemorySegment内存块。
+	 * 6. 向系统中注册ShuffleMetrics，用于跟踪Shuffle过程的监控信息。
+	 * 7. 创建ResultPartitionFactory工厂类，用于创建ResultPartition。
+	 * 8. 创建SingleInputGateFactory工厂类，用于创建SingleInputGate。
+	 */
 	@VisibleForTesting
 	static NettyShuffleEnvironment createNettyShuffleEnvironment(
 			NettyShuffleEnvironmentConfiguration config,

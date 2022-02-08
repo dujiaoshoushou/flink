@@ -182,15 +182,23 @@ public class NettyShuffleEnvironment implements ShuffleEnvironment<ResultPartiti
 			nettyGroup.addGroup(METRIC_GROUP_INPUT));
 	}
 
+	/**
+	 * 1. 根据resultPartitionDeploymentDescriptors的大小初始化ResultPartition数组。
+	 * 2. 遍历ResultPartitionDeploymentDescriptor数组，并根据每一个ResultPartitionDeploymentDescriptor描述信息调用
+	 *    resultPartitionFactory.create()方法创建resultPartition。
+	 * 3. 调用registerOuputMetrics()方法注册ResultPartitions相关的监控指标信息。
+	 * 4. 返回创建的ResultPartition数组。
+	 */
 	@Override
 	public Collection<ResultPartition> createResultPartitionWriters(
 			ShuffleIOOwnerContext ownerContext,
 			Collection<ResultPartitionDeploymentDescriptor> resultPartitionDeploymentDescriptors) {
 		synchronized (lock) {
 			Preconditions.checkState(!isClosed, "The NettyShuffleEnvironment has already been shut down.");
-
+			// 根据resultPartitionDeploymentDescriptors创建ResultPartition数组
 			ResultPartition[] resultPartitions = new ResultPartition[resultPartitionDeploymentDescriptors.size()];
 			int counter = 0;
+			// 遍历resultPartitionDeploymentDescriptors创建ResultPartition
 			for (ResultPartitionDeploymentDescriptor rpdd : resultPartitionDeploymentDescriptors) {
 				resultPartitions[counter++] = resultPartitionFactory.create(ownerContext.getOwnerName(), rpdd);
 			}
@@ -200,6 +208,12 @@ public class NettyShuffleEnvironment implements ShuffleEnvironment<ResultPartiti
 		}
 	}
 
+	/**
+	 * 1. 从ShuffleIOOwnerContext中获取networkInputGroup信息，用创建InputChannelMetrics。
+	 * 2. 根据inputGateDeploymentDescriptors数组的大小创建SingleInputGate数组，用于存储创建好的SingleInputGate。
+	 * 3. 根据InputGateDeploymentDescriptor参数创建对应的SingleInputGate，这一步主要借助singleInputGateFactory工厂类实现。
+	 * 4. 调用registerInputMetrics()方法注册InputGate的监控信息，并返回SingleInputGate集合。
+	 */
 	@Override
 	public Collection<SingleInputGate> createInputGates(
 			ShuffleIOOwnerContext ownerContext,

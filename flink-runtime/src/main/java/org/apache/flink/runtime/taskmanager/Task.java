@@ -363,11 +363,11 @@ public class Task implements Runnable, TaskSlotPayload, TaskActions, PartitionPr
 		final ShuffleIOOwnerContext taskShuffleContext = shuffleEnvironment
 			.createShuffleIOOwnerContext(taskNameWithSubtaskAndId, executionId, metrics.getIOMetricGroup());
 
-		// produced intermediate result partitions
+		// produced intermediate result partitions 创建ResultPartitionWriter
 		final ResultPartitionWriter[] resultPartitionWriters = shuffleEnvironment.createResultPartitionWriters(
 			taskShuffleContext,
 			resultPartitionDeploymentDescriptors).toArray(new ResultPartitionWriter[] {});
-
+		// 对ResultPartition进行装饰
 		this.consumableNotifyingPartitionWriters = ConsumableNotifyingResultPartitionWriterDecorator.decorate(
 			resultPartitionDeploymentDescriptors,
 			resultPartitionWriters,

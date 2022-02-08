@@ -100,6 +100,13 @@ public class ResultPartitionFactory {
 			createBufferPoolFactory(desc.getNumberOfSubpartitions(), desc.getPartitionType()));
 	}
 
+	/**
+	 * 1. 判断ResultPartitionType是否为Blocking类型，如果是则需要创建BufferCompressor，用于压缩Buffer数据，即在离线数据处理过程中通过BufferCompressor压缩Buffer数据。
+	 * 2. 根据numberOfSubpartitions对应的数量创建ResultSubpartition数组，并存储当前ResultPartition中的ResultSubpartition。
+	 * 3. 根据ResultPartitionType参数创建ResultPartition，如果ResultPartitionType是Blocking类型，则创建ReleaseOnConsumptionResultPartition，即数据
+	 *    消费完立即是否ResultPartition。否则创建ResultSubPartition，即不会随着数据消费完之后进行释放，适用流数据处理场景。
+	 * 4. 调用createSubPartitions()方法创建ResultSubpartition.ResultSubpartition会有ID进行分区，并和InputGate中的InputChannel一一对应。
+	 */
 	@VisibleForTesting
 	public ResultPartition create(
 			String taskNameWithSubtaskAndId,
@@ -109,11 +116,13 @@ public class ResultPartitionFactory {
 			int maxParallelism,
 			FunctionWithException<BufferPoolOwner, BufferPool, IOException> bufferPoolFactory) {
 		BufferCompressor bufferCompressor = null;
+		// 如果ResultPartitionType是Blocking类型，则需要创建bufferCompressor，用于数据压缩
 		if (type.isBlocking() && blockingShuffleCompressionEnabled) {
 			bufferCompressor = new BufferCompressor(networkBufferSize, compressionCodec);
 		}
-
+		// 创建ResultSubpartition数组
 		ResultSubpartition[] subpartitions = new ResultSubpartition[numberOfSubpartitions];
+		// 根据条件创建Resultpartition
 		ResultPartition partition = forcePartitionReleaseOnConsumption || !type.isBlocking()
 			? new ReleaseOnConsumptionResultPartition(
 				taskNameWithSubtaskAndId,
@@ -133,7 +142,7 @@ public class ResultPartitionFactory {
 				partitionManager,
 				bufferCompressor,
 				bufferPoolFactory);
-
+		// 创建ResultSubpartition
 		createSubpartitions(partition, type, blockingSubpartitionType, subpartitions);
 
 		LOG.debug("{}: Initialized {}", taskNameWithSubtaskAndId, this);
