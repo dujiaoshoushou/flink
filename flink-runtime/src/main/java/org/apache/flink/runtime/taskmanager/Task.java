@@ -866,6 +866,7 @@ public class Task implements Runnable, TaskSlotPayload, TaskActions, PartitionPr
 
 		// InputGates must be initialized after the partitions, since during InputGate#setup
 		// we are requesting partitions
+		// InputGates 必须等待 ResultPartition初始化完毕后才能进行初始化
 		for (InputGate gate : inputGates) {
 			gate.setup();
 		}

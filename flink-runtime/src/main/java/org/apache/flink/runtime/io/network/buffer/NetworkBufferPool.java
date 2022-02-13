@@ -322,6 +322,16 @@ public class NetworkBufferPool implements BufferPoolFactory, MemorySegmentProvid
 		return internalCreateBufferPool(numRequiredBuffers, maxUsedBuffers, bufferPoolOwner);
 	}
 
+	/**
+	 * 创建本地LocalBufferPool
+	 * 1. 在创建LocalBufferPool之前需要判断LocalBufferPool申请的Buffer数量（numRequiredBuffers）是否符合要求，也就是说NetworkBufferPool中已经占用的
+	 *    Buffer数量（numTotalRequiredBuffers）和即将生气的Buffer数量（numRequiredBuffers）加起来不能大于NetWorkBufferPool整体的Buffer数量（totalNumberOfMemorySegments），
+	 *    如果大于则抛出异常。
+	 * 2. 将申请的Buffer数量添加到numTotalRequiredBuffers中，然后创建LocalBufferPool，再将创建好的LocalBufferPool添加到allBufferPools集合中。
+	 * 3. 调用redistributeBuffers()方法对Buffer进行重写分配，当创建或销毁缓冲池时，NetworkBufferPool会计算剩余空闲的内存块数量，并平均分配给已创建的缓存池。
+	 *    注意，这过程只是指定了缓冲池能使用的内存块数量，并没有真正分配内存块，只有昂需要时才会分配。
+	 * 4. 如果在Buffer重分配过程中出现异常，则调用destroyBufferPool()方法销毁创建的LocalBufferPool，如果创建正常则返回的ResultPartition和InputGate使用。
+	 */
 	private BufferPool internalCreateBufferPool(
 			int numRequiredBuffers,
 			int maxUsedBuffers,
@@ -336,6 +346,7 @@ public class NetworkBufferPool implements BufferPoolFactory, MemorySegmentProvid
 
 			// Ensure that the number of required buffers can be satisfied.
 			// With dynamic memory management this should become obsolete.
+			// 判断申请Buffer数量是否符合要求
 			if (numTotalRequiredBuffers + numRequiredBuffers > totalNumberOfMemorySegments) {
 				throw new IOException(String.format("Insufficient number of network buffers: " +
 								"required %d, but only %d available. %s.",
@@ -343,20 +354,23 @@ public class NetworkBufferPool implements BufferPoolFactory, MemorySegmentProvid
 						totalNumberOfMemorySegments - numTotalRequiredBuffers,
 						getConfigDescription()));
 			}
-
+			// 将申请的Buffer数量添加到numTotalRequiredBuffers中
 			this.numTotalRequiredBuffers += numRequiredBuffers;
 
 			// We are good to go, create a new buffer pool and redistribute
 			// non-fixed size buffers.
+			// 创建LocalBufferPool
 			LocalBufferPool localBufferPool =
 				new LocalBufferPool(this, numRequiredBuffers, maxUsedBuffers, bufferPoolOwner);
-
+			// 添加到allBufferPools中
 			allBufferPools.add(localBufferPool);
 
 			try {
+				// 重新分配Buffer资源
 				redistributeBuffers();
 			} catch (IOException e) {
 				try {
+					// 出现异常则销毁LocalBufferPool
 					destroyBufferPool(localBufferPool);
 				} catch (IOException inner) {
 					e.addSuppressed(inner);

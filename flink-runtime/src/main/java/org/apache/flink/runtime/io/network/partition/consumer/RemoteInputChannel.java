@@ -131,6 +131,12 @@ public class RemoteInputChannel extends InputChannel implements BufferRecycler, 
 	/**
 	 * Assigns exclusive buffers to this input channel, and this method should be called only once
 	 * after this input channel is created.
+	 * 1. 调用memorySegmentProvider.requestMemorySegments()方法，直接通过NetworkBufferPool申请固定数量的MemorySegment，
+	 *    这里的memorySegmentProvider实际上就是NetworkBufferPool。可以看出，RemoteInputChannel是直接向NetworkBufferPool
+	 *    申请固定缓冲区需要的MemorySegment。
+	 * 2. 将申请到的MemorySegment数量赋值给initialCredit和numRequiredBuffers变量，其中initialCredit实际上就是当前的InputChannel的初始信用值。
+	 * 3. 对bufferQueue进行加锁处理，调用bufferQueue.addExclusiveBuffer()方法申请到的MemorySegment保证成NetworkBuffer并存储在bufferQueue的
+	 *    ExclusiveBuffer队列中。bufferQueue同时包含了ExclusiveBuffer和floatingBuffers两种类型的Buffer队列空间。
 	 */
 	void assignExclusiveSegments() throws IOException {
 		checkState(initialCredit == 0, "Bug in input channel setup logic: exclusive buffers have " +
@@ -479,6 +485,18 @@ public class RemoteInputChannel extends InputChannel implements BufferRecycler, 
 	 * pool, and then notify unannounced credits to the producer.
 	 *
 	 * @param backlog The number of unsent buffers in the producer's sub partition.
+
+	 * 1. 在InputChannel中判断Bbacklog + initialCredit指标是否大于当前InputChannel中可以Buffer总数，即floatingBffers和exclusiveBuffers
+	 *                队列中Buffer数量的总和。
+	 * 2. 如果满足判断条件则说明当前InputChannel中的Buffer数量不足以支持消费上游ResultSubPartition中的Buffer数据，此时会调用
+	 *    inputGate.getBufferPool().requestBuffer()方法向LocalBufferPool中申请更多的Buffer内存空间，并添加到FloatingBuffer队列中。
+	 * 3. 如果没有申请到Buffer空间，则将当前InputChannel实现的BufferListener添加到inputGate中，等待有FloatingBuffer释放出来后，就会通知当前
+	 *    InputChannel获取，并将   isWaitingForFloatingBuffers置为True。
+	 * 4. 调用notifyCreditAvailable()方法，向ResultPartition发送InputChannel中的信用值，此时上游Task接收到信用值后，会将对应的
+	 *                ResultSubPartitionViewReader添加到可用队列中，消费Buffer数据并下发到TCP Channel中。
+	 *
+	 * ==================================================================================================================================
+	 *
 	 */
 	void onSenderBacklog(int backlog) throws IOException {
 		int numRequestedBuffers = 0;
@@ -486,35 +504,51 @@ public class RemoteInputChannel extends InputChannel implements BufferRecycler, 
 		synchronized (bufferQueue) {
 			// Similar to notifyBufferAvailable(), make sure that we never add a buffer
 			// after releaseAllResources() released all buffers (see above for details).
+			// 如果InputChannel已经被释放，则直接返回
 			if (isReleased.get()) {
 				return;
 			}
-
+			// 计算numRequiredBuffers
 			numRequiredBuffers = backlog + initialCredit;
+			// 判断numRequiredBuffers数量是否大于AvailableBufferSize
 			while (bufferQueue.getAvailableBufferSize() < numRequiredBuffers && !isWaitingForFloatingBuffers) {
 				Buffer buffer = inputGate.getBufferPool().requestBuffer();
 				if (buffer != null) {
+					// 将Buffer添加到FloatingBuffer队列中
 					bufferQueue.addFloatingBuffer(buffer);
 					numRequestedBuffers++;
-				} else if (inputGate.getBufferProvider().addBufferListener(this)) {
+				} else if (inputGate.getBufferProvider().addBufferListener(this)) { // 如果没有申请上，则将当前InputChannel添加到inputGate的BufferListener机会汇总
 					// If the channel has not got enough buffers, register it as listener to wait for more floating buffers.
 					isWaitingForFloatingBuffers = true;
 					break;
 				}
 			}
 		}
-
+		// 向ResultPartition发送InputChannel中的信用值
 		if (numRequestedBuffers > 0 && unannouncedCredit.getAndAdd(numRequestedBuffers) == 0) {
 			notifyCreditAvailable();
 		}
 	}
 
+	/**
+	 * 1. 对receivedBuffers进行加锁处理，通过isReleased.get()判断receivedBuffers是否已经被释放，如果结果为True，则不处理数据。
+	 * 2. 对比sequenceNumber和expectedSequenceNumber的序列号，判断Buffer数据的顺序是否正常。在Buffer数据中包含了sequenceNumber，
+	 *    而在RemoteInputChannel本地维系expectedSequenceNumber，只有两边的序列号相同才能证明Buffer数据的顺序是正常的且可以进行处理。
+	 * 3. 将Buffer数据添加到receivedBuffers队列中，并累加到expectedSequenceNumber序列号。
+	 * 4. 如果receivedBuffers在添加Buffer之前是空的，需要调用notifyChannelNonEmpty()方法通知InputGate当前的InputChannel中已经
+	 *    写入了数据，在InputGate中会将InputChannel写入InputChannelWithData集合。
+	 * 5. 判断Backlog是否大于0，如果是则说明上游ResultPartition还有更多Buffer数据需要消费，此时调用onSenderBacklog(backlog)方法处理
+	 *    Backlog信息。
+	 * 6. 判断recycleBuffer是否为True，对Buffer内存空间进行回收。当recycleBuffer队列中正常添加Buffer数据时，recycleBuffer为False，
+	 *    也就是不会再RemoteInputChannel中回收Buffer内存空间，Buffer的内存释放由BufferOwner接口实现类控制。
+	 */
 	public void onBuffer(Buffer buffer, int sequenceNumber, int backlog) throws IOException {
 		boolean recycleBuffer = true;
 
 		try {
 
 			final boolean wasEmpty;
+			// receivedBuffers加载处理
 			synchronized (receivedBuffers) {
 				// Similar to notifyBufferAvailable(), make sure that we never add a buffer
 				// after releaseAllResources() released all buffers from receivedBuffers
@@ -522,28 +556,29 @@ public class RemoteInputChannel extends InputChannel implements BufferRecycler, 
 				if (isReleased.get()) {
 					return;
 				}
-
+				// 序列号对比
 				if (expectedSequenceNumber != sequenceNumber) {
 					onError(new BufferReorderingException(expectedSequenceNumber, sequenceNumber));
 					return;
 				}
-
+				// 将Buffer数据添加到receivedBuffer中
 				wasEmpty = receivedBuffers.isEmpty();
 				receivedBuffers.add(buffer);
 				recycleBuffer = false;
 			}
-
+			// 累加序列号
 			++expectedSequenceNumber;
-
+			// 通知ChannelNoEmpty
 			if (wasEmpty) {
 				notifyChannelNonEmpty();
 			}
-
+			// 处理backlog逻辑
 			if (backlog >= 0) {
 				onSenderBacklog(backlog);
 			}
 		} finally {
 			if (recycleBuffer) {
+				// 回收Buffer空间。
 				buffer.recycleBuffer();
 			}
 		}

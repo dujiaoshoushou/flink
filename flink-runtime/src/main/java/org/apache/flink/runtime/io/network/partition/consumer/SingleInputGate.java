@@ -475,20 +475,29 @@ public class SingleInputGate extends InputGate {
 		return getNextBufferOrEvent(false);
 	}
 
+	/**
+	 * 1. 判断hasReceivedAllEndOfPartitionEvents是否为True，如果是则说明该分区中的数据已经消费完毕，此时返回空值给调用方。
+	 * 2. 判断InputGate组件是否已经关闭，如果是则抛出CancelTaskException。
+	 * 3. 调用waitAndGetNextData方法获取InputWithData数据，接入的数据都会被转换为InputWithData<InputChannel, BufferAndAvailability>数据结构
+	 *    存储，这样做主要为了将接入的Buffer数据通过InputChannel进行分区。
+	 * 4. 调用transformToBufferOrEvent()方法将InputWithData<InputChannel, BufferAndAvailability>中的BufferAndAvailability
+	 *    转换为BufferOrEvent数据结构，在BufferOrEvent中涵盖了Buffer数据和Event事件两种类型的消息。
+	 */
 	private Optional<BufferOrEvent> getNextBufferOrEvent(boolean blocking) throws IOException, InterruptedException {
+		// 如果分区中数据已经消费完毕，则返回空值
 		if (hasReceivedAllEndOfPartitionEvents) {
 			return Optional.empty();
 		}
-
+		// 如果InputGate已经关闭，则抛出CancelTaskException
 		if (closeFuture.isDone()) {
 			throw new CancelTaskException("Input gate is already closed.");
 		}
-
+		// 调用waitAndGetNextData()方法获取InputWithData数据
 		Optional<InputWithData<InputChannel, BufferAndAvailability>> next = waitAndGetNextData(blocking);
 		if (!next.isPresent()) {
 			return Optional.empty();
 		}
-
+		// 获取InputWithData数据并转换成BufferOrEvent
 		InputWithData<InputChannel, BufferAndAvailability> inputWithData = next.get();
 		return Optional.of(transformToBufferOrEvent(
 			inputWithData.data.buffer(),
@@ -496,9 +505,19 @@ public class SingleInputGate extends InputGate {
 			inputWithData.input));
 	}
 
+	/**
+	 * 1. 在While循环中获取InputWithData数据，调用getChannel方法获取出对应的InputChannel。
+	 * 2. 调用InputChannel.getNextBuffer()方法，从指定的InputChannel中获取BufferAndAvailability数据。
+	 * 3. 对InputChannelsWithData进行加锁处理，判断Optional<BufferAndAvailability> result中BufferAndAvailability
+	 *    是否不空且BufferAndAvailability内部还有更多数据。如果是，则将当前的InputChannel添加到InputChannelsWithData和
+	 *    enqueuedInputChannelsWithData集合中，继续获取Buffer数据。
+	 * 4. 如果InputChannelsWithData为空，则调用availablilityHelper将当前的InputChannelsWithData设为不可用。
+	 * 5. 如果BufferAndAvailability类型的result存在，即result.isPresent为True，则将BufferAndAvailability转换为InputWithData数据结构并返回。
+	 */
 	private Optional<InputWithData<InputChannel, BufferAndAvailability>> waitAndGetNextData(boolean blocking)
 			throws IOException, InterruptedException {
 		while (true) {
+			// 获取InputChannel
 			Optional<InputChannel> inputChannel = getChannel(blocking);
 			if (!inputChannel.isPresent()) {
 				return Optional.empty();
@@ -506,19 +525,22 @@ public class SingleInputGate extends InputGate {
 
 			// Do not query inputChannel under the lock, to avoid potential deadlocks coming from
 			// notifications.
+			// 调用InputChannel获取NextBuffer数据
 			Optional<BufferAndAvailability> result = inputChannel.get().getNextBuffer();
-
+			// 同步inputChannelsWithData
 			synchronized (inputChannelsWithData) {
+				// 如果result中有数据，且还有更多数据
 				if (result.isPresent() && result.get().moreAvailable()) {
 					// enqueue the inputChannel at the end to avoid starvation
+					// 将inputChannel添加到inputChannelsWithData集合中
 					inputChannelsWithData.add(inputChannel.get());
 					enqueuedInputChannelsWithData.set(inputChannel.get().getChannelIndex());
 				}
-
+				// 如果inputChannelsWithData为空，则将availabilityHelper设为不可用
 				if (inputChannelsWithData.isEmpty()) {
 					availabilityHelper.resetUnavailable();
 				}
-
+				// 如果result存在，则返回InputWithData数据
 				if (result.isPresent()) {
 					return Optional.of(new InputWithData<>(
 						inputChannel.get(),

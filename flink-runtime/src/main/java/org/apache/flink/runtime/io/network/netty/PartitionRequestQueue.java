@@ -153,34 +153,44 @@ class PartitionRequestQueue extends ChannelInboundHandlerAdapter {
 
 		NetworkSequenceViewReader reader = allReaders.get(receiverId);
 		if (reader != null) {
-			reader.addCredit(credit);
+			reader.addCredit(credit); // 向读取器中添加信用值
 
-			enqueueAvailableReader(reader);
+			enqueueAvailableReader(reader); // 将读取器加入availableReaders队列
 		} else {
 			throw new IllegalStateException("No reader for receiverId = " + receiverId + " exists.");
 		}
 	}
 
+	/**
+	 * 1. 如果msg是NetworkSequenceViewReader类型，则调用enqueueAvailableReader()方法激活当前的读取器。
+	 * 2. 如果msg是InputChannelID类型，则释放当前的InputChannel信息，从availablereader队列中删除InputChannelID对应的读取器，
+	 *    同时从allReader队列中删除对应的读取器。
+	 * 3. 如果不是NetworkSequenceViewReader和InputChannelID类型事件，则继续通过ctx.fireUserEventTriggered(msg)方法将
+	 *    msg下发到后续的ChannelHandler中处理。
+	 */
 	@Override
 	public void userEventTriggered(ChannelHandlerContext ctx, Object msg) throws Exception {
 		// The user event triggered event loop callback is used for thread-safe
 		// hand over of reader queues and cancelled producers.
-
+		// 如果msg是NetworkSequenceViewReader类型，则调用enqueueAvailableReader()方法激活当前的读取器
 		if (msg instanceof NetworkSequenceViewReader) {
 			enqueueAvailableReader((NetworkSequenceViewReader) msg);
-		} else if (msg.getClass() == InputChannelID.class) {
+		} else if (msg.getClass() == InputChannelID.class) { // 如果msg是InputChannelID类型，则释放InputChannel信息
 			// Release partition view that get a cancel request.
 			InputChannelID toCancel = (InputChannelID) msg;
 
 			// remove reader from queue of available readers
+			// 从availavle reader 队列中删除InputChannelID对应的读取器
 			availableReaders.removeIf(reader -> reader.getReceiverId().equals(toCancel));
 
 			// remove reader from queue of all readers and release its resource
+			// 从allReader队列中删除Reader并释放资源
 			final NetworkSequenceViewReader toRelease = allReaders.remove(toCancel);
 			if (toRelease != null) {
 				releaseViewReader(toRelease);
 			}
 		} else {
+			// 其他事件则不进行处理，继续下发。
 			ctx.fireUserEventTriggered(msg);
 		}
 	}
@@ -190,6 +200,14 @@ class PartitionRequestQueue extends ChannelInboundHandlerAdapter {
 		writeAndFlushNextMessageIfPossible(ctx.channel());
 	}
 
+	/**
+	 * 1. 循环不断的从availableReader队列中取出可用的读取器读取Buffer数据。
+	 * 2. NetworkSequenceViewReader会通过ResultSubPartitionView从ResultSubPartition中读取Buffer队列的数据，接着赋值给next对象。
+	 * 3. 此时如果next数据为空，则调用reader.getFailureCause()方法获取具体原因，并将ErrorResponse发送到ChannelPipeline中，继续进行处理。
+	 * 4. 如果next.moreAvailable()为true，说明ResultPartition中还有Buffer数据，则将当前NetworkSequenceViewReader添加到AvailavleReader队列中
+	 *    继续读取Buffer数据。
+	 * 5. 将读取出来的Buffer数据构建成BufferResponse对象，并携带Backlog等信息，最后调用channel.writeAndFlush(msg)方法推送到相应的TCP通道中。
+	 */
 	private void writeAndFlushNextMessageIfPossible(final Channel channel) throws IOException {
 		if (fatalError || !channel.isWritable()) {
 			return;
@@ -202,6 +220,7 @@ class PartitionRequestQueue extends ChannelInboundHandlerAdapter {
 		BufferAndAvailability next = null;
 		try {
 			while (true) {
+				// 获取CreditBasedSequenceNumberingViewReader
 				NetworkSequenceViewReader reader = pollAvailableReader();
 
 				// No queue with available data. We allow this here, because
@@ -209,8 +228,8 @@ class PartitionRequestQueue extends ChannelInboundHandlerAdapter {
 				if (reader == null) {
 					return;
 				}
-
 				next = reader.getNextBuffer();
+				// 如果数据为空，则查看具体原因，并发送到ctx中
 				if (next == null) {
 					if (!reader.isReleased()) {
 						continue;
@@ -227,10 +246,11 @@ class PartitionRequestQueue extends ChannelInboundHandlerAdapter {
 				} else {
 					// This channel was now removed from the available reader queue.
 					// We re-add it into the queue if it is still available
+					// 如果next提示还有很多数据，则继续将读取器添加到AvailableReader队列中
 					if (next.moreAvailable()) {
 						registerAvailableReader(reader);
 					}
-
+					// 构建BufferResponse数据，封装Buffer数据
 					BufferResponse msg = new BufferResponse(
 						next.buffer(),
 						reader.getSequenceNumber(),
@@ -239,6 +259,7 @@ class PartitionRequestQueue extends ChannelInboundHandlerAdapter {
 
 					// Write and flush and wait until this is done before
 					// trying to continue with the next buffer.
+					// 将数据输出到指定的TCP通道中
 					channel.writeAndFlush(msg).addListener(writeListener);
 
 					return;

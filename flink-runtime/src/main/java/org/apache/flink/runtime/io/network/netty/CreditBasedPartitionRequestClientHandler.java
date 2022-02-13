@@ -183,6 +183,12 @@ class CreditBasedPartitionRequestClientHandler extends ChannelInboundHandlerAdap
 	 *
 	 * <p>Enqueues the input channel and will trigger write&flush unannounced credits
 	 * for this input channel if it is the first one in the queue.
+	 *
+	 * 1. 判断msg是否为RemoteInputChannel类型，如果不是则交给ChannelHandlerContext继续处理。
+	 * 2. 如果msg是RemoteInputChannel类型，则先获取inputChannelsWithCredit集合，然后判断其是否为空，以此选择是否触发写操作，
+	 *    最后添加RemoteInputChannel到inputChannelsWithCredit集合中。inputChannelsWithCredit集合存储了InputChannel及
+	 *    其具有的信用值。
+	 * 3. 如果inputChannelsWithCredit初始值为空，则调用writeAndFlushNextMessageIfPossible()方法触发发送信用值的操作。
 	 */
 	@Override
 	public void userEventTriggered(ChannelHandlerContext ctx, Object msg) throws Exception {
@@ -241,6 +247,16 @@ class CreditBasedPartitionRequestClientHandler extends ChannelInboundHandlerAdap
 		}
 	}
 
+	/**
+	 * 1. 如果接入的数据为NettyMessage.BufferResponse类型，则将msg转换成NettyMessage.BufferResponse数据，并通过数据中的receiverId获取
+	 *    RemoteInputChannel，这里的receiverId实际上就是InputChannelId。
+	 * 2. 如果inputChannel为空，则释放bufferOrEvent，然后调用cancelRequestFor()方法向上游发送CancelPartitionRequest。
+	 * 3. 如果InputChannel不为空，则调用decodeBufferOrEvent()方法对BufferOrEvetn进行解析和处理。
+	 * 4. 如果上游传输的数据为NettyMessage.ErrorResponse消息，则将数据转换为NettyMessage.ErrorResponse类型，然后判断错误释放为FatalError，
+	 *    如果是则调用notifyAllChannelsOfErrorAndClose()方法关闭所有的InputChannel。
+	 * 5. 如果不是FatalError，且错误为PartitionNotFoundExecption,则调用InputChannel.onFailedPartitionRequest()方法进行处理。
+	 *    其他情况则抛出异常，然后调用InputChannel.onError()方法将错误传递给InputChannel进行处理。
+	 */
 	private void decodeMsg(Object msg) throws Throwable {
 		final Class<?> msgClazz = msg.getClass();
 
@@ -256,7 +272,7 @@ class CreditBasedPartitionRequestClientHandler extends ChannelInboundHandlerAdap
 
 				return;
 			}
-
+			// 解析BufferOrEvent数据
 			decodeBufferOrEvent(inputChannel, bufferOrEvent);
 
 		} else if (msgClazz == NettyMessage.ErrorResponse.class) {
@@ -289,9 +305,25 @@ class CreditBasedPartitionRequestClientHandler extends ChannelInboundHandlerAdap
 		}
 	}
 
+	/**
+	 * ------ Buffer 类型数据 -------
+	 * 1. 通过receivedSize判断接入的Buffer数据是否为空，如果为空则调用InputChannel.onEmptyBuffer()方法进行处理。
+	 * 2. 如果接入的Buffer数据不为空，则通过InputChannel申请Buffer内存空间。
+	 * 3. 调用nettyBuffer.readBytes(buffer.asByteBuf(),receivedSize)方法，将接入的ByteBufnettyBuffer数据写入申请的Buffer内存空间中。
+	 * 4. 将bufferOrEvent中是否压缩对应的配置设定到申请的Buffer数据中。
+	 * 5. 调用InputChannel.onBuffer()方法继续通过InputChannel处理Buffer数据，同时会携带sequenceNumber和Backlog等指标。
+	 * ----- Event 类型数据 ------
+	 * 1. 根据receiveSize临时创建byte[]数组空间，可以看出对于Event数据直接使用了堆内存空间。
+	 * 2. 将ByteBuf nettyBuffer数据写入byte[] byteArray数组中。
+	 * 3. 调用 MemorySegmentFactory.wrap(byteArray)方法，将byte[]转换为MemorySegment
+	 * 4. 通过MemorySegment对象调用 new NetworkBuffer()构造器方法创建NetworkBuffer对象。
+	 * 5. 调用InputChannel.onBuffer()方法将Buffer交给InputChannel继续处理。
+	 */
 	private void decodeBufferOrEvent(RemoteInputChannel inputChannel, NettyMessage.BufferResponse bufferOrEvent) throws Throwable {
 		try {
+			// 从bufferOrEvent中获取nettyBuffer
 			ByteBuf nettyBuffer = bufferOrEvent.getNettyBuffer();
+			// 数据大小
 			final int receivedSize = nettyBuffer.readableBytes();
 			if (bufferOrEvent.isBuffer()) {
 				// ---- Buffer ------------------------------------------------
@@ -302,12 +334,13 @@ class CreditBasedPartitionRequestClientHandler extends ChannelInboundHandlerAdap
 					inputChannel.onEmptyBuffer(bufferOrEvent.sequenceNumber, bufferOrEvent.backlog);
 					return;
 				}
-
+				// 从InputChannel中申请Buffer
 				Buffer buffer = inputChannel.requestBuffer();
 				if (buffer != null) {
+					// 调用nettyBuffer.readBytes()
 					nettyBuffer.readBytes(buffer.asByteBuf(), receivedSize);
 					buffer.setCompressed(bufferOrEvent.isCompressed);
-
+					// 调用InputChannel.onBuffer()方法处理接入的数据
 					inputChannel.onBuffer(buffer, bufferOrEvent.sequenceNumber, bufferOrEvent.backlog);
 				} else if (inputChannel.isReleased()) {
 					cancelRequestFor(bufferOrEvent.receiverId);
@@ -317,12 +350,16 @@ class CreditBasedPartitionRequestClientHandler extends ChannelInboundHandlerAdap
 			} else {
 				// ---- Event -------------------------------------------------
 				// TODO We can just keep the serialized data in the Netty buffer and release it later at the reader
+				// Event类型
+				// 根据receivedSize创建字节数据
 				byte[] byteArray = new byte[receivedSize];
+				// 将nettyBuffer数据写入到byteArray中
 				nettyBuffer.readBytes(byteArray);
-
+				// 创建MemorySegment
 				MemorySegment memSeg = MemorySegmentFactory.wrap(byteArray);
+				// 创建NetworkBuffer
 				Buffer buffer = new NetworkBuffer(memSeg, FreeingBufferRecycler.INSTANCE, false, receivedSize);
-
+				// 调用InputChannel.onBuffer()方法进行处理
 				inputChannel.onBuffer(buffer, bufferOrEvent.sequenceNumber, bufferOrEvent.backlog);
 			}
 		} finally {
@@ -335,6 +372,12 @@ class CreditBasedPartitionRequestClientHandler extends ChannelInboundHandlerAdap
 	 *
 	 * <p>This method may be called by the first input channel enqueuing, or the complete
 	 * future's callback in previous input channel, or the channel writability changed event.
+	 * 1. 判断TCP通道是否处于正常状态，如果TCP通道不可写，则直接返回空。
+	 * 2. 循环获取inputChannelsWithCredit中的InputChannel，并判断其是否为空，如果为空则直接返回。
+	 * 3. 判断InputChannel是否已经释放，因为没有必要为已经释放的InputChannel向ResultPartition通知信用值。
+	 *    如果没有释放则创建AddCreadit请求，其中包含PartitionID、InputChannelId等信息，同时通过getAndResetUnannouncedCredit()方法
+	 *    获取InputChannel的unannouncedCredit指标，将unannouncedCredit清零。
+	 * 4. 调用netty channel向TCP Channel 中写入AddCredit请求，此时ResultPartition上游会收到AddCredit请求。
 	 */
 	private void writeAndFlushNextMessageIfPossible(Channel channel) {
 		if (channelError.get() != null || !channel.isWritable()) {

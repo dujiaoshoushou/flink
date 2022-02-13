@@ -94,6 +94,13 @@ public class NettyPartitionRequestClient implements PartitionRequestClient {
 	 *
 	 * <p>The request goes to the remote producer, for which this partition
 	 * request client instance has been created.
+	 * 1. 调用clientHandler.addInputChannel(inputChannel)方法，将当前的InputChannel添加到NetworkClientHandler中。
+	 *    NetworkClientHandler用于读取生产者中的Buffer或Event数据，并提供向生产者输出Unannouced Credits的方法，其中Credits用于反压实现。
+	 * 2. 创建PartitionRequest对象，将PartitionId、SubpartitionIndex以及InputChannelId等消息封装到PartitionRequest中。
+	 *    PartitionRequest继承了NettyMessage，可以在基于Netty实现的TCP网络中传输PartitionRequest消息。
+	 * 3. 判断delayMs是否为0，如果不为0则表示立即发送，此时会调用tcpChannel.writeAndFlush(request)方法将创建好的PartitionRequest
+	 *    发送到数据生产端所在的Task节点上。
+	 * 4. 如果delayMs不为0，则调用tcpChannel.eventLoop().schedule()方法进行延时发送。
 	 */
 	@Override
 	public void requestSubpartition(

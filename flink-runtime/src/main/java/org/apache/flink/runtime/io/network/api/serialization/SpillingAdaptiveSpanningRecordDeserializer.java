@@ -64,6 +64,14 @@ public class SpillingAdaptiveSpanningRecordDeserializer<T extends IOReadableWrit
 		this.spanningWrapper = new SpanningWrapper(tmpDirectories);
 	}
 
+	/**
+	 * 1. 从Buffer数据中获取MemorySegmentOffset、Buffer数据对应的MemorySegment内存块以及Buffer的numBytes大小等信息。
+	 * 2. 判断SpillingAdaptiveSpanningRecordDeserializer的spanningWrapper中NumGatheredBytes是否大于0，是则将数据
+	 *    MemorySegment继续写入spanningWrapper，否则调用nonSpanningWrapper对接入的MemorySegment进行初始化存储。当spanningWrapper启动后，
+	 *    NumGatheredBytes的指标会大于0，表示正在等待后续的Buffer数据写入，此时主要调用addNextChunkFromMemorySegment()方法将新的segment写入spanningWrapper。
+	 * 3. 如果NumGatheredBytes 小于等于0，则表明spanningWrapper并没有启动和等待Buffer数据接入，此时调用nonSpanningWrapper.initializeFromMemorySegment()
+	 *    方法对MemorySegment进行初始化，并将numBytes、offset等参数传递到方法中。
+	 */
 	@Override
 	public void setNextBuffer(Buffer buffer) throws IOException {
 		currentBuffer = buffer;
@@ -88,6 +96,26 @@ public class SpillingAdaptiveSpanningRecordDeserializer<T extends IOReadableWrit
 		return tmp;
 	}
 
+	/**
+	 * 1. 获取nonSpanningWrapper的剩余空间，判断nonSpanningRemaining是否大于4，如果大于4表明nonSpanningRemaining中的Buffer数据具有完整的长度，
+	 *    优先选择nonSpanningWrapper对Buffer数据进行反序列化操作。如果nonSpanningRemaining小于4且nonSpanningRemaining大于0，
+	 *    则直接创建spanningWrapper实例，将Buffer中的数据添加到spanningWrapper中的Length buffer队列进行处理，并清理nonSpanningWrapper中的数据。
+	 * 2. 获取nonSpanningWrapper中数据的长度，判断长度是否小于nonSpanningRemaining - 4，如果满足，
+	 *    说明此时在nonSpanningRemaining的Buffer中已经可以反序列化
+	 *    出完整的StreamRecord数据，下一步会调用target.read(this.nonSpanningWrapper)方法，
+	 *    将this.nonSpanningWrapper中的Buffer数据反序列化成基本数据类型
+	 *    并写入target对应的StreamRecord中。
+	 * 3. 判断nonSpanningWrapper的reamaining是否大于0，如果大于0则表示nonSpanningWrapper中的Buffer数据没有序列化完，
+	 *   此时返回INTERMEDIATE_RECORD_FROM_BUFFER
+	 *    的结果给StreamTaskNetworkInput，继续循环拉取更多的Buffer数据进行处理。
+	 * 4. 如果不满足len <= nonSpanningRemaining - 4，就会基于nonSpanningWrapper中的Buffer数据创建和初始化spanningWrapper，通过spanningWrapper继续
+	 *    对Buffer数据进行反序列化操作。
+	 * 5. 调用this.spanningWrapper.hasFullRecord()方法判断spanningWrapper中是包含完整的StreamRecord，
+	 *    包含则从spanningWrapper中读取完整的StreamRecord数据。
+	 * 6. 从spanningWrapper中读取完整的StreamRecord数据后，将剩下的Buffer数据发给NonSpanningWrapper。当接入新的Buffer数据是，重复以上步骤。
+	 *    如果NonSpanningWrapper中的remaining为0，则返回DeserializationResult.LAST_RECORD_FROM_BUFFER，表示当前数据是Buffer中的最后一条记录，
+	 *    否则返回DeserializationResult.INTERMEDIATE_RECORD_FROM_BUFFER，表示当前Buffer还没有被消费完。
+	 */
 	@Override
 	public DeserializationResult getNextRecord(T target) throws IOException {
 		// always check the non-spanning wrapper first.

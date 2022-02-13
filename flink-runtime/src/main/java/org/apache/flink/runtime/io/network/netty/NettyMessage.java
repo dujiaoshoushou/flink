@@ -132,6 +132,14 @@ public abstract class NettyMessage {
 	 *
 	 * @return a newly allocated direct buffer with header data written for {@link
 	 * NettyMessageDecoder}
+	 * 1. 检查contentLength长度是否满足要求，即不能超过Integer.MAX_VALUE - FRAME_HEADER_LENGTH的大小，其中FRAME_HEADER_LENGTH是
+	 *    Netty框架本身传递信息需要的内存空间大小为9（4+4+1）。
+	 * 2. 为NettyMessage分配ByteBuf空间，如果allocateForContent为False，则直接申请messageHeaderLength的空间，这种情况仅用了ErrorResponse数据传输。
+	 * 3. 判断contentLength != -1条件是否成立，如果成立则申请FRAME_HEADER_LENGTH + messageHeaderLength + contentLength长度的ByteBuf空间。
+	 * 4. 如果是其他情况，则分配默认长度的ByteBuf空间。
+	 * 5. 在申请的Buffer中写入frame、magic_num以及subclass_id等信息，这些信息一共占9字节空间，用于消息的反序列化操作。
+	 * 6. 将Buffer传输给NettyMessage，继续将消息体写入Buffer，和上面提到的PartitionRequest实例一样，每个NettyMessage实现类都会将partition_id、
+	 *    producer_id等信息写入buffer对象，最终发送到网络中。
 	 */
 	private static ByteBuf allocateBuffer(
 			ByteBufAllocator allocator,
@@ -139,17 +147,22 @@ public abstract class NettyMessage {
 			int messageHeaderLength,
 			int contentLength,
 			boolean allocateForContent) {
+		// 检查contentLength是否超过要求
 		checkArgument(contentLength <= Integer.MAX_VALUE - FRAME_HEADER_LENGTH);
 
 		final ByteBuf buffer;
+		// 如果allocateForContent为False，则直接申请messageHeaderLength的空间
 		if (!allocateForContent) {
 			buffer = allocator.directBuffer(FRAME_HEADER_LENGTH + messageHeaderLength);
 		} else if (contentLength != -1) {
+			// 否则分配FRAME_HEADER_LENGTH + messageHeaderLength + contentLength长度空间
 			buffer = allocator.directBuffer(FRAME_HEADER_LENGTH + messageHeaderLength + contentLength);
 		} else {
 			// content length unknown -> start with the default initial size (rather than FRAME_HEADER_LENGTH only):
+			// 其他情况，则直接分配默认长度的空间。
 			buffer = allocator.directBuffer();
 		}
+		// 在buffer中写入相关信息。
 		buffer.writeInt(FRAME_HEADER_LENGTH + messageHeaderLength + contentLength); // may be updated later, e.g. if contentLength == -1
 		buffer.writeInt(MAGIC_NUMBER);
 		buffer.writeByte(id);
@@ -163,14 +176,24 @@ public abstract class NettyMessage {
 
 	@ChannelHandler.Sharable
 	static class NettyMessageEncoder extends ChannelOutboundHandlerAdapter {
-
+		/**
+		 * 1. 判断传入的msg是否为NettyMessage类型，如果是则调用NettyMessage.write()方法将数据序列化成ByteBuf类型，然后存储到serialized对象中。
+		 * 2. 调用ctx.write(serialized,promise)方法将serialized中的数据写入ChannelHandlerContext，最终通过网络传输到下游节点中。
+		 * 3。 如果msg是其他类型的数据，则调用ctx.write(msg, promise)方法将其写入通道
+		 * @param ctx
+		 * @param msg
+		 * @param promise
+		 * @throws Exception
+		 */
 		@Override
 		public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+			// 判断msg是否为NettyMessage类型
 			if (msg instanceof NettyMessage) {
 
 				ByteBuf serialized = null;
 
 				try {
+					// 如果是则调用NettyMessage.write()方法进行处理
 					serialized = ((NettyMessage) msg).write(ctx.alloc());
 				}
 				catch (Throwable t) {
@@ -183,6 +206,7 @@ public abstract class NettyMessage {
 				}
 			}
 			else {
+				// 如果msg是其他类型数据，则直接将msg写入通道
 				ctx.write(msg, promise);
 			}
 		}
@@ -209,21 +233,32 @@ public abstract class NettyMessage {
 			super(Integer.MAX_VALUE, 0, 4, -4, 4);
 		}
 
+		/**
+		 * 1. 调用super.decode(ctx, in)方法对接ByteBuf数据进行处理，并返回经过处理的ByteBuf信息。
+		 * 2. 从ByteBuf消息这种获取magicNumber,也就是幻数，用于标记文件或者协议格式，在这里主要判断网络中上下游系统协议是否一致，如果不一致则抛出异常。
+		 * 3. 获取msgId，也就是NettMessge每个SubClass生成的ID。在NettyMessageEncoder中会将NettyMessage实现类对应的ID写到ByteBuf中，
+		 *    在这里就会通过msgId确认消息的具体类型。
+		 * 4. 根据msgId和NettyMessage的SubClassId进行对比，确定NettyMessage的类型，然后调用相应的readFrom(msg)方法将消息转换为NettyMessage
+		 *    实现类对应的ID写到ByteBuf中，在这里就会通过msgId确认消息的具体类型。
+		 * 5. 返序列化后的decodedMsg，在finally模块中释放消息占用的空间。
+		 */
 		@Override
 		protected Object decode(ChannelHandlerContext ctx, ByteBuf in) throws Exception {
+			// 调用super.decode(ctx, in)方法
 			ByteBuf msg = (ByteBuf) super.decode(ctx, in);
 			if (msg == null) {
 				return null;
 			}
 
 			try {
+				// 获取幻数
 				int magicNumber = msg.readInt();
 
 				if (magicNumber != MAGIC_NUMBER) {
 					throw new IllegalStateException(
 						"Network stream corrupted: received incorrect magic number.");
 				}
-
+				// 获取msgId
 				byte msgId = msg.readByte();
 
 				final NettyMessage decodedMsg;
@@ -336,10 +371,12 @@ public abstract class NettyMessage {
 			try {
 				if (buffer instanceof Buffer) {
 					// in order to forward the buffer to netty, it needs an allocator set
+					// 为了能够向Netty中发送数据，需要先设定allocator
 					((Buffer) buffer).setAllocator(allocator);
 				}
 
 				// only allocate header buffer - we will combine it with the data buffer below
+				// 仅分配heaerBuf空间
 				headerBuf = allocateBuffer(allocator, ID, messageHeaderLength, buffer.readableBytes(), false);
 
 				receiverId.writeTo(headerBuf);
@@ -348,11 +385,12 @@ public abstract class NettyMessage {
 				headerBuf.writeBoolean(isBuffer);
 				headerBuf.writeBoolean(isCompressed);
 				headerBuf.writeInt(buffer.readableBytes());
-
+				// 创建ComositeByteBuf对象
 				CompositeByteBuf composityBuf = allocator.compositeDirectBuffer();
 				composityBuf.addComponent(headerBuf);
 				composityBuf.addComponent(buffer);
 				// update writer index since we have data written to the components:
+				// 更新索引
 				composityBuf.writerIndex(headerBuf.writerIndex() + buffer.writerIndex());
 				return composityBuf;
 			}
@@ -479,8 +517,9 @@ public abstract class NettyMessage {
 			ByteBuf result = null;
 
 			try {
+				// 分配ByteBuf的空间
 				result = allocateBuffer(allocator, ID, 16 + 16 + 4 + 16 + 4);
-
+				// 向ByteBuf写入需要传输的数据
 				partitionId.getPartitionId().writeTo(result);
 				partitionId.getProducerId().writeTo(result);
 				result.writeInt(queueIndex);

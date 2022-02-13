@@ -242,21 +242,26 @@ public class MemoryManager {
 	 * @return A collection with the allocated memory segments.
 	 * @throws MemoryAllocationException Thrown, if this memory manager does not have the requested amount
 	 *                                   of memory pages any more.
+	 * 1. 从AllocationRequest参数中获取MemorySegment的空集合、申请Pages总数量以及资源Owner等参数，并对参数进行非空和状态检查。
+	 * 2. 确定MemorySegment集合与numberOfPages数量的空间，如果没有则将target置空。
+	 * 3. 从budgetByType中获取资源申请预算，在budgetByType中存储了当前TaskSlot中最大的内存数量，并且按照不同内存区分类型，只有
+	 *    正常获取acquiredBudget时，才会开始分配内存资源，否则抛出MemoryAllocationException。
+	 * 4. 根据具体内存类型调用allocateManagedSegment()方法，获取对应的MemorySegment存储空间，最终返回给算子使用。
 	 */
 	public Collection<MemorySegment> allocatePages(AllocationRequest request) throws MemoryAllocationException {
 		Object owner = request.getOwner();
 		Collection<MemorySegment> target = request.output;
 		int numberOfPages = request.getNumberOfPages();
 
-		// sanity check
+		// sanity check 正常性检查
 		Preconditions.checkNotNull(owner, "The memory owner must not be null.");
 		Preconditions.checkState(!isShutDown, "Memory manager has been shut down.");
 
-		// reserve array space, if applicable
+		// reserve array space, if applicable 保留array空间
 		if (target instanceof ArrayList) {
 			((ArrayList<MemorySegment>) target).ensureCapacity(numberOfPages);
 		}
-
+		// 获取资源申请预算
 		AcquisitionResult<MemoryType> acquiredBudget = budgetByType.acquirePagedBudget(request.getTypes(), numberOfPages);
 		if (acquiredBudget.isFailure()) {
 			throw new MemoryAllocationException(
@@ -265,7 +270,7 @@ public class MemoryManager {
 					numberOfPages,
 					acquiredBudget.getTotalAvailableForAllQueriedKeys()));
 		}
-
+		// 根据具体内存类型调用allocateManagedSegment()方法获取MemorySegment空间
 		allocatedSegments.compute(owner, (o, currentSegmentsForOwner) -> {
 			Set<MemorySegment> segmentsForOwner = currentSegmentsForOwner == null ?
 				new HashSet<>(numberOfPages) : currentSegmentsForOwner;

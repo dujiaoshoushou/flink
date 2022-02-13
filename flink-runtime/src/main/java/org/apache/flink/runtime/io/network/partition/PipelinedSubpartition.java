@@ -100,6 +100,17 @@ class PipelinedSubpartition extends ResultSubpartition {
 		LOG.debug("{}: Finished {}.", parent.getOwningTaskName(), this);
 	}
 
+	/**
+	 * 1. PipelinedSubpartition包含ArrayDeque<BufferConsumer> buffers队列，用于存储创建好的BufferConsumer对象，
+	 *    写入新的BufferConsumer对象时，会对buffer进行上锁处理，直到BufferConsumer写入完毕。
+	 * 2. 当BufferConsumer成功添加至ResultSubPartition.buffers队列后，调用updateStatistics(bufferConsumer)方法
+	 *    更新buffers队列的统计信息。
+	 * 3. 调用increaseBuffersInBacklog(bufferConsumer)方法增加ResultSubPartition的Backlog值，用于控制上下游
+	 *    数据的生产和消费速率，实现基于Credit的反压控制。
+	 * 4. 调用shouldNotifyDataAvailable()方法获取PipelinedSubpartition能否可以被消费的信息，并经过运算赋值给notifyDataAvailable，
+	 *    用于判断当前的ResultSubPartition是否可以被ResultSubPartitionView消费。如果notifyDataAvailable为True，则调用
+	 *    notifyDataAvailable()方法通知ResultSubPartitionView的持有者开始消费ResultSubPartition中的Buffer数据。
+	 */
 	private boolean add(BufferConsumer bufferConsumer, boolean finish) {
 		checkNotNull(bufferConsumer);
 
@@ -113,6 +124,7 @@ class PipelinedSubpartition extends ResultSubpartition {
 			// Add the bufferConsumer and update the stats
 			buffers.add(bufferConsumer);
 			updateStatistics(bufferConsumer);
+			// 更新Backlog指标
 			increaseBuffersInBacklog(bufferConsumer);
 			notifyDataAvailable = shouldNotifyDataAvailable() || finish;
 
@@ -156,36 +168,52 @@ class PipelinedSubpartition extends ResultSubpartition {
 		}
 	}
 
+	/**
+	 * 1. 对Buffer队列进行加锁处理，防止出现线程安排问题，保证数据一致性。
+	 * 2. 如果Buffer队列为空，则将flushRequested置为false，表明不进行数据清洗操作。
+	 * 3. 如果Buffer队列不为空，则遍历Buffer队列，从队列中获取BufferConsumer对象，然后调用BufferConsumer.build()方法生成Buffer数据。
+	 * 4. 如果Buffer队列中的数据都消费完毕了，即满足buffers.size()==1的条件，则将flushRequested参数设置为false。
+	 * 5. 如果bufferConsumer正常消费完毕，即bufferConsumer.isFinished()返回True，则弹出当前的bufferConsumer，然后调用
+	 *    decreaseBuffersInBacklogUnsafe()方法更新Backlog指标。
+	 * 6. 如果buffer.readableBytes()>0,说明buffer对象中还含有从BufferCustomer中转换处理的Buffer数据，此时跳出循环，继续后续操作。
+	 * 7. 否则对buffer对象对应的内存快进行回收处理，并将buffer对象置为null，直接返回null值给ViewReader。
+	 * 8. 调用updateStatistics(buffer)方法，更新Buffer数据统计信息。
+	 * 9. 返回BufferAndBacklog对象，BufferAndBackLog结果中包含了Buffer数据和Backlog指标，
+	 *    其中Backlog是上游生产者提供个下游Buffer数据积压状态的计数值，用于实现反压控制。
+	 * @return
+	 */
 	@Nullable
 	BufferAndBacklog pollBuffer() {
 		synchronized (buffers) {
 			Buffer buffer = null;
-
+			// 如果buffe为空，则直接关闭刷新请求标志
 			if (buffers.isEmpty()) {
 				flushRequested = false;
 			}
 
 			while (!buffers.isEmpty()) {
+				// 从buffers中获取BufferConsumer数据
 				BufferConsumer bufferConsumer = buffers.peek();
 
 				buffer = bufferConsumer.build();
 
 				checkState(bufferConsumer.isFinished() || buffers.size() == 1,
 					"When there are multiple buffers, an unfinished bufferConsumer can not be at the head of the buffers queue.");
-
+				// buffers中的所有数据均消费完，关闭刷新请求标志
 				if (buffers.size() == 1) {
 					// turn off flushRequested flag if we drained all of the available data
 					flushRequested = false;
 				}
-
+				// 如果bufferConsumer被消费完毕，则释放buffer对象的内存空间
 				if (bufferConsumer.isFinished()) {
 					buffers.pop().close();
 					decreaseBuffersInBacklogUnsafe(bufferConsumer.isBuffer());
 				}
-
+				// 如果buffer的大小为0，则跳出循环
 				if (buffer.readableBytes() > 0) {
 					break;
 				}
+				// 否则对buffer中的内存进行回收处理
 				buffer.recycleBuffer();
 				buffer = null;
 				if (!bufferConsumer.isFinished()) {
@@ -196,11 +224,12 @@ class PipelinedSubpartition extends ResultSubpartition {
 			if (buffer == null) {
 				return null;
 			}
-
+			// 更新统计信息
 			updateStatistics(buffer);
 			// Do not report last remaining buffer on buffers as available to read (assuming it's unfinished).
 			// It will be reported for reading either on flush or when the number of buffers in the queue
 			// will be 2 or more.
+			// 返回BufferAndBacklog
 			return new BufferAndBacklog(
 				buffer,
 				isAvailableUnsafe(),
@@ -341,7 +370,7 @@ class PipelinedSubpartition extends ResultSubpartition {
 	private void decreaseBuffersInBacklogUnsafe(boolean isBuffer) {
 		assert Thread.holdsLock(buffers);
 		if (isBuffer) {
-			buffersInBacklog--;
+			buffersInBacklog--; // buffersInBacklog进行自减操作。
 		}
 	}
 
@@ -351,8 +380,9 @@ class PipelinedSubpartition extends ResultSubpartition {
 	 */
 	@GuardedBy("buffers")
 	private void increaseBuffersInBacklog(BufferConsumer buffer) {
+		// 确保获取到buffers队列的对象锁
 		assert Thread.holdsLock(buffers);
-
+		// 对buffersInBacklog进行累加操作
 		if (buffer != null && buffer.isBuffer()) {
 			buffersInBacklog++;
 		}
