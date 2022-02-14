@@ -170,13 +170,15 @@ public class CepOperator<IN, KEY, OUT>
 		super.initializeState(context);
 
 		// initializeState through the provided context
+		// 存储NFA状态在匹配过程中的中间状态
 		computationStates = context.getKeyedStateStore().getState(
 			new ValueStateDescriptor<>(
 				NFA_STATE_NAME,
 				new NFAStateSerializer()));
-
+		// 负责存储匹配过程中被接收的中间结果
 		partialMatches = new SharedBuffer<>(context.getKeyedStateStore(), inputSerializer);
-
+		// 是一个队列数据结构，用于存储上游流入数据，存储结构是一个MapState<Long, List<IN>>，key为时间戳，Value为List
+		// List中保存相应时间戳的数据
 		elementQueueState = context.getKeyedStateStore().getMapState(
 				new MapStateDescriptor<>(
 						EVENT_QUEUE_STATE_NAME,
@@ -214,7 +216,7 @@ public class CepOperator<IN, KEY, OUT>
 				"watermark-callbacks",
 				VoidNamespaceSerializer.INSTANCE,
 				this);
-
+		// 创建nfa初始化了所有的顶点statue和边transition，这个时候的state集合已经初始化完成了。
 		nfa = nfaFactory.createNFA();
 		nfa.open(cepRuntimeContext, new Configuration());
 
@@ -257,12 +259,13 @@ public class CepOperator<IN, KEY, OUT>
 			// In event-time processing we assume correctness of the watermark.
 			// Events with timestamp smaller than or equal with the last seen watermark are considered late.
 			// Late events are put in a dedicated side output, if the user has specified one.
-
+			// 当数据没有被视为迟到时
 			if (timestamp > lastWatermark) {
 
 				// we have an event with a valid timestamp, so
 				// we buffer it until we receive the proper watermark.
-
+				// 窗口是把record属于的窗口的右边界作为定时器，用于触发整个窗口的数据触发，但是cep是来一个都处理所以将当前水印+1作为定时器，
+				// 自由
 				saveRegisterWatermarkTimer();
 
 				bufferEvent(value, timestamp);
